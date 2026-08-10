@@ -140,6 +140,118 @@ export const allWorkflows: FullWorkflow[] = [
   },
 ];
 
+// --- Agents ---
+
+export type AgentType = "llm" | "tool";
+export type AgentStatus = "online" | "idle" | "offline";
+
+export type AgentDetail = {
+  id: string;
+  name: string;
+  provider: string;
+  type: AgentType;
+  status: AgentStatus;
+  description: string;
+  capabilities: string[];
+  callsToday: number;
+};
+
+export const agentsCatalog: AgentDetail[] = [
+  {
+    id: "claude",
+    name: "Claude",
+    provider: "Anthropic",
+    type: "llm",
+    status: "online",
+    description: "Long-context reasoning, writing, and document analysis.",
+    capabilities: ["Reasoning", "Writing", "Document analysis", "Code review"],
+    callsToday: 412,
+  },
+  {
+    id: "gpt-4",
+    name: "GPT-4",
+    provider: "OpenAI",
+    type: "llm",
+    status: "online",
+    description: "General-purpose reasoning and coding assistant.",
+    capabilities: ["Reasoning", "Coding", "General Q&A"],
+    callsToday: 358,
+  },
+  {
+    id: "gemini",
+    name: "Gemini",
+    provider: "Google",
+    type: "llm",
+    status: "online",
+    description: "Multimodal reasoning across text, image, and data.",
+    capabilities: ["Multimodal", "Reasoning", "Image understanding"],
+    callsToday: 201,
+  },
+  {
+    id: "tavily",
+    name: "Tavily",
+    provider: "Tavily",
+    type: "tool",
+    status: "online",
+    description: "Real-time web search for up-to-date information.",
+    capabilities: ["Web search", "News retrieval"],
+    callsToday: 156,
+  },
+  {
+    id: "mcp-github",
+    name: "MCP: GitHub",
+    provider: "Model Context Protocol",
+    type: "tool",
+    status: "idle",
+    description: "Reads and writes to connected GitHub repositories.",
+    capabilities: ["Read repos", "Open PRs", "Read issues"],
+    callsToday: 24,
+  },
+  {
+    id: "mcp-postgres",
+    name: "MCP: Postgres",
+    provider: "Model Context Protocol",
+    type: "tool",
+    status: "idle",
+    description: "Runs read queries against the connected database.",
+    capabilities: ["SQL queries", "Schema inspection"],
+    callsToday: 9,
+  },
+  {
+    id: "docker-sandbox",
+    name: "Docker Sandbox",
+    provider: "Internal",
+    type: "tool",
+    status: "offline",
+    description: "Executes generated code safely in an isolated container.",
+    capabilities: ["Code execution", "Package install"],
+    callsToday: 0,
+  },
+];
+
+// --- History ---
+
+export type HistoryEntry = {
+  id: string;
+  title: string;
+  agents: string[];
+  outcome: "success" | "failed";
+  time: string;
+  group: "Today" | "Yesterday" | "Earlier";
+};
+
+export const historyLog: HistoryEntry[] = [
+  { id: "h1", title: "Analyze churn drivers & draft report", agents: ["Research", "Writing"], outcome: "success", time: "10:42 AM", group: "Today" },
+  { id: "h2", title: "Competitor pricing brief", agents: ["Research", "Writing"], outcome: "success", time: "9:58 AM", group: "Today" },
+  { id: "h3", title: "Refactor auth middleware", agents: ["Coding"], outcome: "success", time: "9:10 AM", group: "Today" },
+  { id: "h4", title: "Invoice batch OCR + summary", agents: ["Document"], outcome: "failed", time: "6:15 PM", group: "Yesterday" },
+  { id: "h5", title: "Product launch deck", agents: ["Research", "Writing", "Image"], outcome: "success", time: "2:40 PM", group: "Yesterday" },
+  { id: "h6", title: "Weekly newsletter draft", agents: ["Writing"], outcome: "success", time: "11:05 AM", group: "Yesterday" },
+  { id: "h7", title: "Customer feedback theme analysis", agents: ["Research"], outcome: "success", time: "Mon", group: "Earlier" },
+  { id: "h8", title: "Landing page copy variants", agents: ["Writing"], outcome: "success", time: "Mon", group: "Earlier" },
+  { id: "h9", title: "Bug triage summary", agents: ["Coding", "Writing"], outcome: "failed", time: "Fri", group: "Earlier" },
+];
+
 export type ConnectedAgent = {
   name: string;
   role: string;

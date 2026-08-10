@@ -62,6 +62,84 @@ export const recentWorkflows: WorkflowItem[] = [
   { title: "Invoice batch OCR + summary", agents: ["Document"], time: "5h ago", status: "failed" },
 ];
 
+// lib/mock-data.ts  (add below the existing recentWorkflows block)
+
+export type WorkflowStatus = "running" | "done" | "failed" | "queued";
+
+export type FullWorkflow = {
+  id: string;
+  title: string;
+  description: string;
+  agents: string[];
+  status: WorkflowStatus;
+  progress: number; // 0-100
+  createdAt: string;
+  duration: string;
+};
+
+export const allWorkflows: FullWorkflow[] = [
+  {
+    id: "wf_8841",
+    title: "Analyze churn drivers & draft report",
+    description: "Pulls usage data, identifies churn signals, and writes an executive summary.",
+    agents: ["Research", "Writing"],
+    status: "running",
+    progress: 62,
+    createdAt: "Just now",
+    duration: "40s",
+  },
+  {
+    id: "wf_8840",
+    title: "Competitor pricing brief",
+    description: "Scrapes competitor pricing pages and summarizes positioning.",
+    agents: ["Research", "Writing"],
+    status: "done",
+    progress: 100,
+    createdAt: "12m ago",
+    duration: "3m 10s",
+  },
+  {
+    id: "wf_8839",
+    title: "Refactor auth middleware",
+    description: "Reviews auth middleware for edge cases and proposes a refactor.",
+    agents: ["Coding"],
+    status: "done",
+    progress: 100,
+    createdAt: "48m ago",
+    duration: "1m 52s",
+  },
+  {
+    id: "wf_8838",
+    title: "Product launch deck",
+    description: "Builds slide content and generates supporting illustrations.",
+    agents: ["Research", "Writing", "Image"],
+    status: "done",
+    progress: 100,
+    createdAt: "2h ago",
+    duration: "5m 04s",
+  },
+  {
+    id: "wf_8837",
+    title: "Invoice batch OCR + summary",
+    description: "OCRs uploaded invoices and summarizes totals by vendor.",
+    agents: ["Document"],
+    status: "failed",
+    progress: 47,
+    createdAt: "5h ago",
+    duration: "—",
+  },
+  {
+    id: "wf_8836",
+    title: "Weekly newsletter draft",
+    description: "Drafts the weekly newsletter from this week's shipped changes.",
+    agents: ["Writing"],
+    status: "queued",
+    progress: 0,
+    createdAt: "Scheduled",
+    duration: "—",
+  },
+];
+
 export type ConnectedAgent = {
   name: string;
   role: string;

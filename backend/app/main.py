@@ -3,9 +3,17 @@ from pydantic import BaseModel
 from typing import List
 from datetime import datetime
 import uuid
+<<<<<<< HEAD
 from fastapi.middleware.cors import CORSMiddleware
+=======
+from app.agents.registry import (
+    get_all_agents,
+    get_agent,
+)
+from dotenv import load_dotenv
+>>>>>>> d5ebc22a36678347f626534361d252fe2ab30561
 
-
+load_dotenv()
 app = FastAPI(
     title="OneAgent API",
     version="1.0.0",
@@ -128,61 +136,23 @@ async def update_profile(profile: UserProfile):
         "profile": profile,
     }
 
-
-# ============================================================
-# AGENTS
-# ============================================================
-
-AGENTS = [
-    {
-        "id": "gemini",
-        "name": "Gemini",
-        "type": "General AI",
-        "plan": "Free",
-        "status": "available",
-    },
-    {
-        "id": "research",
-        "name": "Research Agent",
-        "type": "Web Research",
-        "plan": "Free",
-        "status": "available",
-    },
-    {
-        "id": "coding",
-        "name": "Code Agent",
-        "type": "Programming",
-        "plan": "Free",
-        "status": "available",
-    },
-    {
-        "id": "gpt-advanced",
-        "name": "Advanced GPT",
-        "type": "Advanced Reasoning",
-        "plan": "Pro",
-        "status": "premium",
-    },
-]
-
-
 @app.get("/api/agents", tags=["Agents"])
 async def get_agents():
     return {
-        "agents": AGENTS
+        "agents": get_all_agents()
     }
-
 
 @app.get("/api/agents/{agent_id}", tags=["Agents"])
-async def get_agent(agent_id: str):
-    for agent in AGENTS:
-        if agent["id"] == agent_id:
-            return agent
+async def get_agent_details(agent_id: str):
 
-    return {
-        "error": "Agent not found"
-    }
+    agent = get_agent(agent_id)
 
+    if not agent:
+        return {
+            "error": "Agent not found"
+        }
 
+    return agent
 # ============================================================
 # WORKFLOWS
 # ============================================================
@@ -296,3 +266,24 @@ async def orchestration_status(workflow_id: str):
         "status": "completed",
         "result": "Task processing completed successfully.",
     }
+from app.agents.coding_agent import CodingAgent
+
+
+coding_agent = CodingAgent()
+
+
+@app.post("/api/agents/coding/execute", tags=["Agents"])
+async def execute_coding_agent(request: TaskRequest):
+
+    return await coding_agent.execute(
+        task=request.task
+    )
+from app.analyzer.task_analyzer import TaskAnalyzer
+
+task_analyzer = TaskAnalyzer()
+
+
+@app.post("/api/analyze", tags=["Orchestration"])
+async def analyze_task(request: TaskRequest):
+
+    return task_analyzer.analyze(request.task)

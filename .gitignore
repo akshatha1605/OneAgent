@@ -53,3 +53,136 @@ htmlcov/
 # Misc
 # ==========================
 *.sqlite3
+
+# ============================================
+# OneAgent - Root .gitignore
+# ============================================
+
+# -----------------------------
+# Environment / Secrets
+# -----------------------------
+.env
+.env.local
+.env.development
+.env.development.local
+.env.test
+.env.test.local
+.env.production
+.env.production.local
+
+*.env
+!.env.example
+
+# -----------------------------
+# Node.js / Next.js Frontend
+# -----------------------------
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/dist/
+
+frontend/.turbo/
+frontend/.vercel/
+
+# Next.js cache
+frontend/.next/cache/
+
+# npm
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/pnpm-debug.log*
+
+# Optional package manager files
+# Keep package-lock.json / yarn.lock / pnpm-lock.yaml
+# Do NOT ignore lock files.
+
+# -----------------------------
+# Python / FastAPI Backend
+# -----------------------------
+backend/__pycache__/
+backend/**/__pycache__/
+backend/*.py[cod]
+backend/**/*.py[cod]
+
+# Python virtual environments
+backend/venv/
+backend/.venv/
+backend/env/
+backend/ENV/
+
+# Python tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# -----------------------------
+# Logs
+# -----------------------------
+*.log
+logs/
+backend/logs/
+frontend/logs/
+
+# -----------------------------
+# Database / Local Data
+# -----------------------------
+*.db
+*.sqlite
+*.sqlite3
+
+# Local data directories
+backend/data/
+data/
+
+# -----------------------------
+# IDE / Editors
+# -----------------------------
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+.idea/
+*.iml
+
+# -----------------------------
+# OS Files
+# -----------------------------
+.DS_Store
+.DS_Store?
+Thumbs.db
+desktop.ini
+
+# -----------------------------
+# Temporary / Backup Files
+# -----------------------------
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*~
+
+# -----------------------------
+# Build / Cache
+# -----------------------------
+.cache/
+.parcel-cache/
+.eslintcache
+
+# -----------------------------
+# Test / Coverage
+# -----------------------------
+coverage/
+.nyc_output/
+
+# -----------------------------
+# Generated Files
+# -----------------------------
+*.generated.*

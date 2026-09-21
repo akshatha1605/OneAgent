@@ -28,24 +28,32 @@ export default function WorkflowsPage() {
           return;
         }
 
-        const mappedWorkflows: Workflow[] = data.map(
-          (workflow, index) => ({
-            id: workflow.id ?? `workflow-${index}`,
-            title: workflow.title ?? "Untitled workflow",
-            description:
-              workflow.description ?? "No description provided.",
-            status:
-              workflow.status === "running"
-                ? "running"
-                : workflow.status === "failed"
-                  ? "failed"
-                  : workflow.status === "done"
-                    ? "done"
-                    : "queued",
-            agents: workflow.agents ?? [],
-            createdAt: workflow.createdAt ?? "Unknown",
-            duration: workflow.duration ?? "—",
-            progress: workflow.progress,
+        const mappedWorkflows: Workflow[] = data.workflows.map((workflow, index) => ({
+          id: workflow.workflow_id ?? workflow.id ?? `workflow-${index}`,
+          title: workflow.task ?? workflow.title ?? "Untitled workflow",
+
+          description:
+            workflow.description ??
+            workflow.task ??
+            "No description provided.",
+
+          status:
+            workflow.status === "running"
+              ? "running"
+              : workflow.status === "failed"
+              ? "failed"
+              : workflow.status === "completed" ||
+               workflow.status === "done"
+              ? "done"
+              : "queued",
+
+          agents: workflow.agents ?? [],
+
+          createdAt: workflow.createdAt ?? "Unknown",
+
+          duration: workflow.duration ?? "—",
+
+          progress: workflow.progress,
           })
         );
 

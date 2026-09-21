@@ -28,7 +28,7 @@ export default function AgentsPage() {
           return;
         }
 
-        const mappedAgents: Agent[] = data.map((agent, index) => ({
+        const mappedAgents: Agent[] = data.agents.map((agent, index) => ({
           id: agent.id ?? `agent-${index}`,
           name: agent.name ?? "Unnamed Agent",
           provider: agent.provider ?? "Unknown",

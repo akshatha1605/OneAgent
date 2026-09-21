@@ -74,23 +74,34 @@ export default function HistoryPage() {
 
         const workflows = await getWorkflows();
 
-        if (cancelled) {
-          return;
-        }
+if (cancelled) return;
 
-        const mappedEntries: HistoryEntry[] = workflows.map(
-          (workflow, index) => ({
-            id: workflow.id ?? `workflow-${index}`,
-            title: workflow.title ?? "Untitled workflow",
-            agents: workflow.agents ?? [],
-            time: formatHistoryTime(workflow.createdAt),
-            outcome:
-              workflow.status === "failed"
-                ? "failed"
-                : "success",
-            group: getHistoryGroup(workflow.createdAt),
-          })
-        );
+const mappedEntries: HistoryEntry[] = workflows.workflows.map(
+  (workflow, index) => ({
+    id:
+      workflow.workflow_id ??
+      workflow.id ??
+      `workflow-${index}`,
+
+    title:
+      workflow.task ??
+      workflow.title ??
+      "Untitled workflow",
+
+    agents: workflow.agents ?? [],
+
+    time: formatHistoryTime(workflow.createdAt),
+
+    outcome:
+      workflow.status === "failed"
+        ? "failed"
+        : "success",
+
+    group: getHistoryGroup(workflow.createdAt),
+  })
+);
+
+setEntries(mappedEntries);
 
         setEntries(mappedEntries);
       } catch (err) {

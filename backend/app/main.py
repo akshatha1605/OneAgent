@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from typing import List
 from datetime import datetime
 import uuid
+from fastapi.middleware.cors import CORSMiddleware
 
 
 app = FastAPI(
@@ -11,6 +12,16 @@ app = FastAPI(
     description="Intelligent Multi-Agent AI Orchestration Platform",
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ============================================================
 # MODELS

@@ -13,7 +13,6 @@ import RunningAgents, {
 import {
   getOrchestrationStatus,
   getWorkflow,
-  type BackendWorkflow,
 } from "@/lib/api";
 
 type WorkflowDetailPageProps = {
@@ -42,6 +41,8 @@ function normalizeStatus(
     case "done":
     case "completed":
       return "completed";
+    case "queued":
+        return "queued";
     case "failed":
       return "failed";
     default:
@@ -50,46 +51,55 @@ function normalizeStatus(
 }
 
 function mapWorkflow(
-  workflow: BackendWorkflow,
+  workflow: Awaited<ReturnType<typeof getWorkflow>>,
   statusData?: Awaited<ReturnType<typeof getOrchestrationStatus>>
 ): WorkflowView {
   const status = normalizeStatus(
     statusData?.status ?? workflow.status
   );
 
-  const backendAgents =
-    statusData?.agents ?? [];
+  const tasks = workflow.tasks ?? [];
 
-  const agents: RunningAgent[] = backendAgents.map(
-    (agent, index) => ({
-      id: agent.id ?? `agent-${index}`,
-      name: agent.name ?? "Unnamed Agent",
-      task: agent.description ?? "Processing workflow",
-      progress:
-        status === "completed"
-          ? 100
-          : status === "failed"
-            ? 0
-            : statusData?.progress ?? 0,
-      tone: status === "failed" ? "#DC2626" : "#D97706",
-    })
+  const agents: RunningAgent[] = tasks.map((task, index) => ({
+    id: `task-${index}`,
+    name: task.name,
+    task: task.name,
+    progress:
+      task.status === "completed"
+        ? 100
+        : task.status === "running"
+          ? 50
+          : 0,
+    tone:
+      task.status === "failed"
+        ? "#DC2626"
+        : "#D97706",
+  }));
+
+  const activeTaskIndex = tasks.findIndex(
+    (task) => task.status === "running"
   );
 
   return {
-    id: workflow.id,
-    title: workflow.title ?? "Untitled workflow",
-    description:
-      workflow.description ?? "No description provided.",
+    id: workflow.workflow_id,
+
+    title: `Workflow ${workflow.workflow_id}`,
+
+    description: "Multi-step workflow execution",
+
     status,
+
     activeStep:
-      statusData?.activeStep ??
-      statusData?.active_step ??
-      0,
-    agentCount:
-      backendAgents.length ||
-      workflow.agents?.length ||
-      0,
-    elapsedTime: workflow.duration ?? "—",
+      activeTaskIndex >= 0
+        ? activeTaskIndex
+        : status === "completed"
+          ? tasks.length
+          : 0,
+
+    agentCount: tasks.length,
+
+    elapsedTime: "—",
+
     agents,
   };
 }

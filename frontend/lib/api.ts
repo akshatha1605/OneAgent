@@ -74,15 +74,32 @@ export type WorkflowStatus =
   | "failed"
   | "queued";
 
+export type AgentsResponse = {
+  agents: BackendAgent[];
+};
+
 export type BackendWorkflow = {
-  id: string;
+  id?: string;
+  workflow_id?: string;
   title?: string;
+  task?: string;
   description?: string;
-  status?: WorkflowStatus | string;
+  status?: string;
   agents?: string[];
   createdAt?: string;
   duration?: string;
   progress?: number;
+};
+
+export type WorkflowTask = {
+  name: string;
+  status: "queued" | "running" | "completed" | "failed" | string;
+};
+
+export type WorkflowDetailResponse = {
+  workflow_id: string;
+  status: "queued" | "running" | "completed" | "failed" | string;
+  tasks: WorkflowTask[];
 };
 
 export type OrchestrationRequest = {
@@ -123,7 +140,7 @@ export function getHealth() {
 /* -------------------------------------------------------------------------- */
 
 export function getAgents() {
-  return request<BackendAgent[]>("/api/agents");
+  return request<AgentsResponse>("/api/agents");
 }
 
 export function getAgent(agentId: string) {
@@ -136,12 +153,16 @@ export function getAgent(agentId: string) {
 /* Workflows                                                                  */
 /* -------------------------------------------------------------------------- */
 
+export type WorkflowsResponse = {
+  workflows: BackendWorkflow[];
+};
+
 export function getWorkflows() {
-  return request<BackendWorkflow[]>("/api/workflows");
+  return request<WorkflowsResponse>("/api/workflows");
 }
 
 export function getWorkflow(workflowId: string) {
-  return request<BackendWorkflow>(
+  return request<WorkflowDetailResponse >(
     `/api/workflows/${encodeURIComponent(workflowId)}`
   );
 }

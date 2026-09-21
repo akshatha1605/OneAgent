@@ -1,37 +1,93 @@
 "use client";
 
-import { runningAgents } from "@/lib/mock-data";
+export type RunningAgent = {
+  id: string;
+  name: string;
+  task: string;
+  progress: number;
+  tone?: string;
+};
 
-export default function RunningAgents() {
+type RunningAgentsProps = {
+  agents?: RunningAgent[];
+};
+
+export default function RunningAgents({
+  agents = [],
+}: RunningAgentsProps) {
   return (
     <div className="rounded-xl border border-border bg-card p-5">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-[13px] font-semibold text-primary">Running Agents</h3>
-        <span className="text-[11.5px] text-faint">{runningAgents.length} active</span>
+      <div className="mb-4 flex items-center justify-between">
+        <h3 className="text-[13px] font-semibold text-primary">
+          Running Agents
+        </h3>
+
+        <span className="text-[11.5px] text-faint">
+          {agents.length} {agents.length === 1 ? "active" : "active"}
+        </span>
       </div>
-      <div className="flex flex-col gap-4">
-        {runningAgents.map((a) => (
-          <div key={a.name}>
-            <div className="flex items-center justify-between mb-1.5">
-              <div className="flex items-center gap-2">
-                <span
-                  className="w-1.5 h-1.5 rounded-full"
-                  style={{ backgroundColor: a.tone }}
-                />
-                <span className="text-[12.5px] font-medium text-primary">{a.name}</span>
+
+      {agents.length === 0 ? (
+        <div className="flex min-h-[100px] items-center justify-center rounded-lg border border-dashed border-border">
+          <p className="text-[12px] text-faint">
+            No agents are currently running.
+          </p>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {agents.map((agent) => {
+            const progress = Math.min(
+              100,
+              Math.max(0, agent.progress)
+            );
+
+            const tone = agent.tone ?? "#D97706";
+
+            return (
+              <div key={agent.id}>
+                <div className="mb-1.5 flex items-center justify-between">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span
+                      className="h-1.5 w-1.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: tone }}
+                      aria-hidden="true"
+                    />
+
+                    <span className="truncate text-[12.5px] font-medium text-primary">
+                      {agent.name}
+                    </span>
+                  </div>
+
+                  <span className="ml-3 shrink-0 font-mono text-[11.5px] text-faint">
+                    {progress}%
+                  </span>
+                </div>
+
+                <div className="mb-1.5 truncate text-[11.5px] text-muted">
+                  {agent.task}
+                </div>
+
+                <div
+                  className="h-1.5 overflow-hidden rounded-full bg-[#F0F0EE]"
+                  role="progressbar"
+                  aria-valuenow={progress}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-label={`${agent.name} progress`}
+                >
+                  <div
+                    className="h-full rounded-full transition-all duration-500"
+                    style={{
+                      width: `${progress}%`,
+                      backgroundColor: tone,
+                    }}
+                  />
+                </div>
               </div>
-              <span className="text-[11.5px] text-faint font-mono">{a.pct}%</span>
-            </div>
-            <div className="text-[11.5px] text-muted mb-1.5 truncate">{a.task}</div>
-            <div className="h-1.5 rounded-full bg-[#F0F0EE] overflow-hidden">
-              <div
-                className="h-full rounded-full transition-all duration-700"
-                style={{ width: `${a.pct}%`, backgroundColor: a.tone }}
-              />
-            </div>
-          </div>
-        ))}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

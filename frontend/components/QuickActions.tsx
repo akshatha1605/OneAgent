@@ -1,7 +1,14 @@
 "use client";
 
-import { Compass, Code2, PenLine, Image as ImageIcon, FileText, Plus } from "lucide-react";
-import { quickActions } from "@/lib/mock-data";
+import {
+  Compass,
+  Code2,
+  PenLine,
+  Image as ImageIcon,
+  FileText,
+  Plus,
+} from "lucide-react";
+import { quickActions, type QuickAction } from "@/lib/mock-data";
 
 const ICONS = {
   compass: Compass,
@@ -12,22 +19,37 @@ const ICONS = {
   plus: Plus,
 };
 
-export default function QuickActions() {
+type QuickActionsProps = {
+  onAction?: (action: QuickAction) => void;
+};
+
+export default function QuickActions({
+  onAction,
+}: QuickActionsProps) {
   return (
-    <div className="grid grid-cols-3 sm:grid-cols-6 gap-2.5">
-      {quickActions.map((a) => {
-        const Icon = ICONS[a.icon];
+    <div className="grid grid-cols-3 gap-2.5 sm:grid-cols-6">
+      {quickActions.map((action) => {
+        const Icon = ICONS[action.icon];
+
         return (
           <button
-            key={a.label}
+            key={action.label}
+            type="button"
+            onClick={() => onAction?.(action)}
+            aria-label={action.label}
             className={`flex flex-col items-center justify-center gap-2 rounded-xl border py-4 text-[12.5px] font-medium transition-all ${
-              a.primary
-                ? "bg-primary text-white border-transparent shadow-sm hover:brightness-105"
+              action.primary
+                ? "border-transparent bg-primary text-white shadow-sm hover:brightness-105"
                 : "border-border bg-card text-[#374151] hover:border-accent/40 hover:bg-[#FFFBF5]"
             }`}
           >
-            <Icon size={17} strokeWidth={2} color={a.primary ? "#fff" : "#D97706"} />
-            {a.label}
+            <Icon
+              size={17}
+              strokeWidth={2}
+              className={action.primary ? "text-white" : "text-[#D97706]"}
+            />
+
+            {action.label}
           </button>
         );
       })}

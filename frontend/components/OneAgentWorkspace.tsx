@@ -9,7 +9,9 @@ import {
   ArrowUp,
   Sparkles,
 } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
+import { orchestrateTask } from "@/lib/api";
 
 type Capability = {
   label: string;
@@ -50,102 +52,147 @@ export default function OneAgentWorkspace() {
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
-  const submitTask = () => {
+  const submitTask = async () => {
     const task = input.trim();
 
-    if (!task || loading) return;
+    if (!task || loading) {
+      return;
+    }
 
     setQuestion(task);
     setInput("");
-    setLoading(true);
     setAnswer("");
+    setError("");
+    setLoading(true);
 
-    // Temporary frontend simulation.
-    // This will be replaced by the FastAPI orchestrator later.
-    setTimeout(() => {
-      setAnswer(
-        "I understand your request. OneAgent will analyze the task, determine the capabilities required, select the most suitable agents internally, and generate the final result here."
-      );
+    try {
+      const response = await orchestrateTask(task);
+
+      const result =
+        response.result ??
+        response.message ??
+        (response.agent
+          ? `Task routed to ${response.agent}.`
+          : "The task was received successfully.");
+
+      setAnswer(result);
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Something went wrong while processing your task.";
+
+      setError(message);
+    } finally {
       setLoading(false);
-    }, 900);
+    }
   };
 
   const selectCapability = (prompt: string) => {
+    if (loading) {
+      return;
+    }
+
     setInput(prompt);
+    setError("");
+  };
+
+  const startNewTask = () => {
+    if (loading) {
+      return;
+    }
+
+    setQuestion("");
+    setAnswer("");
+    setError("");
+    setInput("");
   };
 
   return (
     <section className="flex flex-col gap-8">
       {/* Hero */}
-      <div className="text-center pt-8">
-
+      <div className="pt-8 text-center">
         <h1 className="text-[28px] font-semibold tracking-tight text-primary">
           What can I help you accomplish?
         </h1>
 
-        <p className="text-[14px] text-muted mt-2">
+        <p className="mt-2 text-[14px] text-muted">
           Tell OneAgent what you need. It will figure out the best way to
           handle it.
         </p>
       </div>
 
       {/* Main input */}
-      <div className="w-full max-w-3xl mx-auto">
-        <div className="rounded-2xl border border-border bg-card shadow-sm p-2 focus-within:border-[#D97706] transition-colors">
+      <div className="mx-auto w-full max-w-3xl">
+        <div
+          className={`rounded-2xl border bg-card p-2 shadow-sm transition-colors ${
+            loading
+              ? "border-border"
+              : "border-border focus-within:border-[#D97706]"
+          }`}
+        >
           <div className="flex items-end gap-2">
             <textarea
               value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  submitTask();
+              onChange={(event) => setInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  void submitTask();
                 }
               }}
+              disabled={loading}
               rows={2}
               placeholder="Ask OneAgent to research, write, code, analyze..."
-              className="flex-1 resize-none border-0 outline-none bg-transparent px-3 py-3 text-[14px] text-primary placeholder:text-faint"
+              aria-label="Task for OneAgent"
+              className="flex-1 resize-none border-0 bg-transparent px-3 py-3 text-[14px] text-primary outline-none placeholder:text-faint disabled:cursor-not-allowed disabled:opacity-60"
             />
 
             <button
-              onClick={submitTask}
+              type="button"
+              onClick={() => void submitTask()}
               disabled={!input.trim() || loading}
-              className="w-10 h-10 shrink-0 rounded-xl bg-primary text-white flex items-center justify-center transition-all disabled:opacity-30 hover:brightness-110"
-              aria-label="Send"
+              aria-label={loading ? "Processing task" : "Send task"}
+              title={loading ? "Processing task" : "Send task"}
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-white transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-30"
             >
               <ArrowUp size={18} strokeWidth={2.2} />
             </button>
           </div>
         </div>
 
-        <div className="text-center text-[11px] text-faint mt-2">
+        <div className="mt-2 text-center text-[11px] text-faint">
           Press Enter to send · Shift + Enter for a new line
         </div>
       </div>
 
       {/* Capabilities */}
       {!question && (
-        <div className="w-full max-w-3xl mx-auto">
-          <div className="text-[12px] font-semibold text-primary mb-3">
+        <div className="mx-auto w-full max-w-3xl">
+          <div className="mb-3 text-[12px] font-semibold text-primary">
             Try OneAgent for
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-5">
             {capabilities.map((capability) => {
               const Icon = capability.icon;
 
               return (
                 <button
                   key={capability.label}
+                  type="button"
                   onClick={() => selectCapability(capability.prompt)}
-                  className="group flex flex-col items-center justify-center gap-2 rounded-xl border border-border bg-card px-3 py-4 text-[12px] font-medium text-[#374151] transition-all hover:border-[#D97706]/40 hover:bg-[#FFFBF5]"
+                  disabled={loading}
+                  className="group flex flex-col items-center justify-center gap-2 rounded-xl border border-border bg-card px-3 py-4 text-[12px] font-medium text-[#374151] transition-all hover:border-[#D97706]/40 hover:bg-[#FFFBF5] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Icon
                     size={18}
                     strokeWidth={1.9}
                     className="text-[#D97706] transition-transform group-hover:scale-105"
                   />
+
                   {capability.label}
                 </button>
               );
@@ -156,40 +203,54 @@ export default function OneAgentWorkspace() {
 
       {/* Conversation */}
       {question && (
-        <div className="w-full max-w-3xl mx-auto flex flex-col gap-5">
-          {/* User */}
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-5">
+          {/* User message */}
           <div className="flex justify-end">
-            <div className="max-w-[80%] rounded-2xl rounded-br-md bg-primary text-white px-4 py-3 text-[13.5px] leading-relaxed">
+            <div className="max-w-[80%] rounded-2xl rounded-br-md bg-primary px-4 py-3 text-[13.5px] leading-relaxed text-white">
               {question}
             </div>
           </div>
 
-          {/* OneAgent */}
+          {/* OneAgent response */}
           <div className="flex gap-3">
-            <div className="w-8 h-8 shrink-0 rounded-lg bg-primary text-white flex items-center justify-center">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-white">
               <Sparkles size={15} />
             </div>
 
             <div className="flex-1 pt-1">
-              <div className="text-[12px] font-semibold text-primary mb-2">
+              <div className="mb-2 text-[12px] font-semibold text-primary">
                 OneAgent
               </div>
 
               {loading ? (
-                <div className="flex items-center gap-1.5 text-[13px] text-muted">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#D97706] animate-bounce" />
+                <div
+                  className="flex items-center gap-1.5 text-[13px] text-muted"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#D97706]" />
+
                   <span
-                    className="w-1.5 h-1.5 rounded-full bg-[#D97706] animate-bounce"
+                    className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#D97706]"
                     style={{ animationDelay: "100ms" }}
                   />
+
                   <span
-                    className="w-1.5 h-1.5 rounded-full bg-[#D97706] animate-bounce"
+                    className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#D97706]"
                     style={{ animationDelay: "200ms" }}
                   />
-                  <span className="ml-1">Thinking...</span>
+
+                  <span className="ml-1">Processing...</span>
+                </div>
+              ) : error ? (
+                <div
+                  className="rounded-xl border border-[#FECACA] bg-[#FEF2F2] px-4 py-4 text-[13.5px] leading-relaxed text-[#B91C1C]"
+                  role="alert"
+                >
+                  {error}
                 </div>
               ) : (
-                <div className="rounded-xl border border-border bg-card px-4 py-4 text-[13.5px] text-[#374151] leading-relaxed">
+                <div className="rounded-xl border border-border bg-card px-4 py-4 text-[13.5px] leading-relaxed text-[#374151]">
                   {answer}
                 </div>
               )}
@@ -199,10 +260,8 @@ export default function OneAgentWorkspace() {
           {/* New task */}
           {!loading && (
             <button
-              onClick={() => {
-                setQuestion("");
-                setAnswer("");
-              }}
+              type="button"
+              onClick={startNewTask}
               className="self-start text-[12px] font-medium text-[#D97706] hover:underline"
             >
               + Start a new task
@@ -213,21 +272,21 @@ export default function OneAgentWorkspace() {
 
       {/* Recent activity */}
       {!question && (
-        <div className="w-full max-w-3xl mx-auto pt-2">
-          <div className="flex items-center justify-between mb-3">
+        <div className="mx-auto w-full max-w-3xl pt-2">
+          <div className="mb-3 flex items-center justify-between">
             <div className="text-[12px] font-semibold text-primary">
               Recent activity
             </div>
 
-            <a
+            <Link
               href="/history"
               className="text-[11.5px] font-medium text-[#D97706] hover:underline"
             >
               View all
-            </a>
+            </Link>
           </div>
 
-          <div className="rounded-xl border border-border bg-card divide-y divide-[#F0F0EE]">
+          <div className="divide-y divide-[#F0F0EE] rounded-xl border border-border bg-card">
             <ActivityItem
               title="Competitor pricing brief"
               detail="Research · Writing"
@@ -264,15 +323,14 @@ function ActivityItem({
   return (
     <div className="flex items-center justify-between px-4 py-3.5">
       <div className="min-w-0">
-        <div className="text-[12.5px] font-medium text-primary truncate">
+        <div className="truncate text-[12.5px] font-medium text-primary">
           {title}
         </div>
-        <div className="text-[11px] text-faint mt-0.5">{detail}</div>
+
+        <div className="mt-0.5 text-[11px] text-faint">{detail}</div>
       </div>
 
-      <div className="text-[10.5px] text-faint shrink-0 ml-4">
-        {time}
-      </div>
+      <div className="ml-4 shrink-0 text-[10.5px] text-faint">{time}</div>
     </div>
   );
 }

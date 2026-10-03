@@ -1,23 +1,26 @@
 from typing import Any, Dict
 
 from app.agents.base_agent import BaseAgent
-from app.models.gemini_adapter import GeminiAdapter
+from app.models.model_adapter import ModelAdapter
 
 
 class CodingAgent(BaseAgent):
+    """
+    Agent responsible for programming and software-development tasks.
+    """
 
-    def __init__(self):
+    def __init__(self, model: ModelAdapter):
         super().__init__(
             agent_id="coding",
-            name="Coding Agent"
+            name="Coding Agent",
         )
 
-        self.model = GeminiAdapter()
+        self.model = model
 
     async def execute(
         self,
         task: str,
-        context: Dict[str, Any] | None = None
+        context: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
 
         try:
@@ -41,7 +44,7 @@ Instructions:
 
             response = await self.model.generate(
                 prompt=prompt,
-                context=context
+                context=context,
             )
 
             return self.success_response(
@@ -49,14 +52,13 @@ Instructions:
                 result=response,
                 metadata={
                     "task_type": "programming",
-                    "model": "gemini",
-                    "execution_mode": "ai"
-                }
+                    "execution_mode": "ai",
+                },
             )
 
         except Exception as e:
 
             return self.error_response(
                 task=task,
-                error=str(e)
+                error=f"{type(e).__name__}: {e}",
             )

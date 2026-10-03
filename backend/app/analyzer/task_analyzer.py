@@ -1,129 +1,194 @@
-# ============================================================
-# ONEAGENT - TASK ANALYZER
-# ============================================================
+from typing import Dict
 
-from typing import Dict, Any
+from sentence_transformers import SentenceTransformer, util
+
+from app.models.task_models import TaskAnalysis
 
 
 class TaskAnalyzer:
     """
-    Analyzes a user task and identifies the capabilities
-    required to complete it.
+    Semantic task analyzer for OneAgent.
+
+    Uses sentence embeddings to determine which registered
+    agent is the best semantic match for the user's task.
+
+    The routing confidence is based on the relative separation
+    between the best and second-best agent matches rather than
+    treating raw cosine similarity as probability.
     """
 
-    def analyze(self, task: str) -> Dict[str, Any]:
+    def __init__(self):
 
-        text = task.lower().strip()
+        self.model = SentenceTransformer(
+            "all-MiniLM-L6-v2"
+        )
 
-        capabilities = []
+        self.agent_descriptions: Dict[str, str] = {
 
-        # ----------------------------------------------------
-        # Programming
-        # ----------------------------------------------------
+            "coding": (
+                "Programming and software development tasks. "
+                "Writing Python, Java, C++, JavaScript or other programs. "
+                "Debugging code, fixing errors, implementing algorithms, "
+                "designing functions, APIs and solving programming problems."
+            ),
 
-        programming_keywords = [
-            "code",
-            "coding",
-            "program",
-            "programming",
-            "python",
-            "java",
-            "javascript",
-            "debug",
-            "bug",
-            "algorithm",
-            "function",
-            "api",
-            "implement",
-        ]
+            "research": (
+                "Research and information gathering tasks. "
+                "Finding facts, investigating topics, studying subjects, "
+                "comparing information, collecting evidence and "
+                "summarizing research findings."
+            ),
 
-        if any(word in text for word in programming_keywords):
-            capabilities.append("programming")
+            "writing": (
+                "Writing and content creation tasks. "
+                "Writing essays, emails, articles, captions and paragraphs. "
+                "Rewriting, editing, paraphrasing and improving written content."
+            ),
 
-        # ----------------------------------------------------
-        # Research
-        # ----------------------------------------------------
-
-        research_keywords = [
-            "research",
-            "find information",
-            "search",
-            "latest",
-            "investigate",
-            "study",
-            "compare",
-            "comparison",
-            "advantages",
-            "disadvantages",
-        ]
-
-        if any(word in text for word in research_keywords):
-            capabilities.append("research")
-
-        # ----------------------------------------------------
-        # Writing
-        # ----------------------------------------------------
-
-        writing_keywords = [
-            "write",
-            "rewrite",
-            "rephrase",
-            "edit",
-            "improve",
-            "essay",
-            "paragraph",
-            "content",
-            "caption",
-            "email",
-        ]
-
-        if any(word in text for word in writing_keywords):
-            capabilities.append("writing")
-
-        # ----------------------------------------------------
-        # Document generation
-        # ----------------------------------------------------
-
-        document_keywords = [
-            "report",
-            "document",
-            "documentation",
-            "prepare a report",
-            "generate a report",
-            "pdf",
-        ]
-
-        if any(word in text for word in document_keywords):
-            capabilities.append("document_generation")
-
-        # ----------------------------------------------------
-        # General task
-        # ----------------------------------------------------
-
-        if not capabilities:
-            capabilities.append("general_question")
-
-        # ----------------------------------------------------
-        # Determine task complexity
-        # ----------------------------------------------------
-
-        requires_multiple_agents = len(capabilities) > 1
-
-        if requires_multiple_agents:
-            task_type = "complex"
-        elif capabilities[0] == "general_question":
-            task_type = "general"
-        else:
-            task_type = "simple"
-        if (
-            any(word in text for word in writing_keywords)
-            and "programming" not in capabilities
-        ):
-            capabilities.append("writing")
-
-        return {
-            "task": task,
-            "task_type": task_type,
-            "required_capabilities": capabilities,
-            "requires_multiple_agents": requires_multiple_agents,
+            "document": (
+                "Structured document preparation tasks. "
+                "Creating reports, documentation, formatted documents, "
+                "project documentation and structured written documents."
+            ),
         }
+
+        self.agent_names = list(
+            self.agent_descriptions.keys()
+        )
+
+        self.agent_embeddings = self.model.encode(
+            list(self.agent_descriptions.values()),
+            convert_to_tensor=True
+        )
+
+    async def analyze(self, task: str) -> TaskAnalysis:
+
+        if not task or not task.strip():
+            raise ValueError("Task cannot be empty.")
+
+        # ---------------------------------------------------------
+        # 1. Encode user task
+        # ---------------------------------------------------------
+
+        task_embedding = self.model.encode(
+            task,
+            convert_to_tensor=True
+        )
+
+        # ---------------------------------------------------------
+        # 2. Calculate similarity against every agent
+        # ---------------------------------------------------------
+
+        similarities = util.cos_sim(
+            task_embedding,
+            self.agent_embeddings
+        )[0]
+
+        # Sort agents by similarity.
+        ranked_indices = similarities.argsort(
+            descending=True
+        )
+
+        best_index = int(
+            ranked_indices[0].item()
+        )
+
+        second_index = int(
+            ranked_indices[1].item()
+        )
+
+        best_agent = self.agent_names[best_index]
+
+        best_similarity = float(
+            similarities[best_index].item()
+        )
+
+        second_similarity = float(
+            similarities[second_index].item()
+        )
+
+        # ---------------------------------------------------------
+        # 3. Calculate routing confidence
+        # ---------------------------------------------------------
+        #
+        # Raw cosine similarity is NOT treated as probability.
+        #
+        # Instead, confidence depends on how clearly the best
+        # agent is separated from the next-best agent.
+        #
+
+        margin = best_similarity - second_similarity
+
+        # Convert the margin into a practical routing confidence.
+        #
+        # A margin of around 0.20 or greater indicates a strong
+        # semantic separation for this small four-agent registry.
+        #
+        # The value is capped to [0, 1].
+
+        confidence = min(
+            1.0,
+            max(
+                0.0,
+                margin / 0.20
+            )
+        )
+
+        # ---------------------------------------------------------
+        # 4. Determine complexity
+        # ---------------------------------------------------------
+
+        word_count = len(task.split())
+
+        if word_count > 40:
+            complexity = "complex"
+        elif word_count > 15:
+            complexity = "medium"
+        else:
+            complexity = "simple"
+
+        # ---------------------------------------------------------
+        # 5. Map agent to task type
+        # ---------------------------------------------------------
+
+        task_type_map = {
+            "coding": "programming",
+            "research": "research",
+            "writing": "writing",
+            "document": "document_generation",
+        }
+
+        capability_map = {
+            "coding": [
+                "programming",
+                "code_generation",
+            ],
+
+            "research": [
+                "research",
+                "information_search",
+            ],
+
+            "writing": [
+                "writing",
+                "content_generation",
+            ],
+
+            "document": [
+                "document_generation",
+                "documentation",
+            ],
+        }
+
+        # ---------------------------------------------------------
+        # 6. Return structured analysis
+        # ---------------------------------------------------------
+
+        return TaskAnalysis(
+            task_type=task_type_map[best_agent],
+            capabilities=capability_map[best_agent],
+            complexity=complexity,
+            recommended_agent=best_agent,
+            confidence=confidence,
+            routing_method="semantic",
+        )

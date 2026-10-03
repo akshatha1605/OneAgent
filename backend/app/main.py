@@ -1,24 +1,39 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
-from typing import List
 from datetime import datetime
 import uuid
-<<<<<<< HEAD
+
+from dotenv import load_dotenv
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-=======
+from pydantic import BaseModel
+
 from app.agents.registry import (
     get_all_agents,
     get_agent,
 )
-from dotenv import load_dotenv
->>>>>>> d5ebc22a36678347f626534361d252fe2ab30561
+from app.orchestrator import Orchestrator
+
+
+# ============================================================
+# ENVIRONMENT
+# ============================================================
 
 load_dotenv()
+
+
+# ============================================================
+# APPLICATION
+# ============================================================
+
 app = FastAPI(
     title="OneAgent API",
     version="1.0.0",
     description="Intelligent Multi-Agent AI Orchestration Platform",
 )
+
+
+# ============================================================
+# CORS
+# ============================================================
 
 app.add_middleware(
     CORSMiddleware,
@@ -31,9 +46,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # ============================================================
-# MODELS
+# REQUEST / RESPONSE MODELS
 # ============================================================
+
 
 class UserRegister(BaseModel):
     name: str
@@ -64,6 +81,7 @@ class WorkflowCreate(BaseModel):
 # SYSTEM
 # ============================================================
 
+
 @app.get("/", tags=["System"])
 async def root():
     return {
@@ -84,6 +102,7 @@ async def health():
 # ============================================================
 # AUTHENTICATION
 # ============================================================
+
 
 @app.post("/api/auth/register", tags=["Authentication"])
 async def register(user: UserRegister):
@@ -119,6 +138,7 @@ async def current_user():
 # USERS
 # ============================================================
 
+
 @app.get("/api/users/profile", tags=["Users"])
 async def get_profile():
     return {
@@ -136,11 +156,18 @@ async def update_profile(profile: UserProfile):
         "profile": profile,
     }
 
+
+# ============================================================
+# AGENTS
+# ============================================================
+
+
 @app.get("/api/agents", tags=["Agents"])
 async def get_agents():
     return {
         "agents": get_all_agents()
     }
+
 
 @app.get("/api/agents/{agent_id}", tags=["Agents"])
 async def get_agent_details(agent_id: str):
@@ -153,9 +180,12 @@ async def get_agent_details(agent_id: str):
         }
 
     return agent
+
+
 # ============================================================
 # WORKFLOWS
 # ============================================================
+
 
 @app.post("/api/workflows", tags=["Workflows"])
 async def create_workflow(workflow: WorkflowCreate):
@@ -195,6 +225,7 @@ async def get_workflows():
 
 @app.get("/api/workflows/{workflow_id}", tags=["Workflows"])
 async def get_workflow(workflow_id: str):
+
     return {
         "workflow_id": workflow_id,
         "status": "running",
@@ -215,8 +246,12 @@ async def get_workflow(workflow_id: str):
     }
 
 
-@app.post("/api/workflows/{workflow_id}/execute", tags=["Workflows"])
+@app.post(
+    "/api/workflows/{workflow_id}/execute",
+    tags=["Workflows"],
+)
 async def execute_workflow(workflow_id: str):
+
     return {
         "workflow_id": workflow_id,
         "status": "running",
@@ -228,31 +263,30 @@ async def execute_workflow(workflow_id: str):
 # ORCHESTRATION
 # ============================================================
 
-@app.post("/api/orchestrate", tags=["Orchestration"])
+# OneAgent's central orchestration engine.
+#
+# The orchestrator owns:
+#   - Task Analyzer
+#   - Agent selection
+#   - Model selection
+#   - Search provider selection
+#   - Agent execution
+#   - Model fallback
+#
+# Agents are NOT directly instantiated here.
+
+orchestrator = Orchestrator()
+
+
+@app.post(
+    "/api/orchestrate",
+    tags=["Orchestration"],
+)
 async def orchestrate(request: TaskRequest):
 
-    task = request.task.lower()
-
-    selected_agents = []
-
-    if any(word in task for word in ["code", "coding", "program", "debug"]):
-        selected_agents.append("coding")
-
-    if any(word in task for word in ["research", "find", "latest", "search"]):
-        selected_agents.append("research")
-
-    if not selected_agents:
-        selected_agents.append("gemini")
-
-    workflow_id = f"wf_{uuid.uuid4().hex[:8]}"
-
-    return {
-        "workflow_id": workflow_id,
-        "task": request.task,
-        "status": "processing",
-        "selected_agents": selected_agents,
-        "message": "OneAgent has analyzed the task and selected suitable agents.",
-    }
+    return await orchestrator.process(
+        task=request.task
+    )
 
 
 @app.get(
@@ -266,24 +300,20 @@ async def orchestration_status(workflow_id: str):
         "status": "completed",
         "result": "Task processing completed successfully.",
     }
-from app.agents.coding_agent import CodingAgent
 
 
-coding_agent = CodingAgent()
+# ============================================================
+# TASK ANALYSIS
+# ============================================================
 
-
-@app.post("/api/agents/coding/execute", tags=["Agents"])
-async def execute_coding_agent(request: TaskRequest):
-
-    return await coding_agent.execute(
-        task=request.task
-    )
-from app.analyzer.task_analyzer import TaskAnalyzer
-
-task_analyzer = TaskAnalyzer()
-
-
-@app.post("/api/analyze", tags=["Orchestration"])
+@app.post(
+    "/api/analyze",
+    tags=["Orchestration"],
+)
 async def analyze_task(request: TaskRequest):
 
-    return task_analyzer.analyze(request.task)
+    analysis = await orchestrator.analyzer.analyze(
+        request.task
+    )
+
+    return analysis.model_dump()

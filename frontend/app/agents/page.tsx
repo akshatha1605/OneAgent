@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { RefreshCw } from "lucide-react";
 
 import Sidebar from "@/components/Sidebar";
 import TopBar from "@/components/TopBar";
@@ -14,61 +15,62 @@ export default function AgentsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    let cancelled = false;
+  const loadAgents = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError("");
 
-    const loadAgents = async () => {
-      try {
-        setLoading(true);
-        setError("");
+      const data = await getAgents();
 
-        const data = await getAgents();
-
-        if (cancelled) {
-          return;
-        }
-
-        const mappedAgents: Agent[] = data.agents.map((agent, index) => ({
+      const mappedAgents: Agent[] = data.agents.map(
+        (agent, index) => ({
           id: agent.id ?? `agent-${index}`,
           name: agent.name ?? "Unnamed Agent",
           provider: agent.provider ?? "Unknown",
-          type: agent.type === "tool" ? "tool" : "llm",
+
+          type:
+            agent.type === "tool"
+              ? "tool"
+              : "llm",
+
           status:
             agent.status === "online"
               ? "online"
               : agent.status === "offline"
-                ? "offline"
-                : "idle",
+              ? "offline"
+              : "idle",
+
           description:
-            agent.description ?? "No description provided.",
-          capabilities: agent.capabilities ?? [],
-          callsToday: agent.callsToday ?? 0,
-        }));
+            agent.description ??
+            "No description provided.",
 
-        setAgents(mappedAgents);
-      } catch (err) {
-        if (cancelled) {
-          return;
-        }
+          capabilities:
+            agent.capabilities ?? [],
 
-        setError(
-          err instanceof Error
-            ? err.message
-            : "Unable to load agents."
-        );
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    };
+          callsToday:
+            agent.callsToday ?? 0,
+        })
+      );
 
-    void loadAgents();
-
-    return () => {
-      cancelled = true;
-    };
+      setAgents(mappedAgents);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to load agents."
+      );
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void loadAgents();
+  }, [loadAgents]);
+
+  const onlineAgents = agents.filter(
+    (agent) => agent.status === "online"
+  ).length;
 
   return (
     <div className="flex min-h-screen w-full bg-background">
@@ -77,40 +79,100 @@ export default function AgentsPage() {
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar />
 
-        <main className="flex flex-1 flex-col gap-6 overflow-auto px-6 py-6">
-          <div>
-            <h1 className="text-[19px] font-semibold tracking-tight text-primary">
-              Agents
-            </h1>
+        <main className="flex flex-1 flex-col gap-8 overflow-auto px-6 py-7">
+          {/* Header */}
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h1 className="text-[26px] font-semibold tracking-tight text-primary">
+                Agents
+              </h1>
 
-            <p className="mt-0.5 text-[13px] text-muted">
-              Models and tools OneAgent can call on.
-            </p>
+              <p className="mt-1.5 text-[15px] leading-6 text-muted">
+                Models and tools OneAgent can call on.
+              </p>
+            </div>
+
+            {!loading && !error && (
+              <div className="flex items-center gap-2 self-start rounded-lg border border-border bg-card px-3.5 py-2.5 sm:self-auto">
+                <span
+                  className={`h-2.5 w-2.5 rounded-full ${
+                    onlineAgents > 0
+                      ? "bg-[#16A34A]"
+                      : "bg-[#9CA3AF]"
+                  }`}
+                  aria-hidden="true"
+                />
+
+                <span className="text-[13px] font-medium text-primary">
+                  {onlineAgents}{" "}
+                  {onlineAgents === 1
+                    ? "agent"
+                    : "agents"}{" "}
+                  available
+                </span>
+              </div>
+            )}
           </div>
 
+          {/* Loading */}
           {loading ? (
             <div
-              className="flex min-h-[180px] items-center justify-center rounded-xl border border-dashed border-border bg-card"
+              className="flex min-h-[240px] items-center justify-center rounded-2xl border border-dashed border-border bg-card"
               role="status"
               aria-live="polite"
             >
-              <p className="text-[13px] text-faint">
-                Loading agents...
-              </p>
+              <div className="text-center">
+                <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-border border-t-[#D97706]" />
+
+                <p className="text-[14px] font-medium text-primary">
+                  Loading agents...
+                </p>
+
+                <p className="mt-1 text-[12px] text-faint">
+                  Connecting to the OneAgent backend.
+                </p>
+              </div>
             </div>
           ) : error ? (
+            /* Error */
             <div
-              className="rounded-xl border border-[#FECACA] bg-[#FEF2F2] px-5 py-4"
+              className="flex flex-col gap-4 rounded-2xl border border-[#FECACA] bg-[#FEF2F2] px-6 py-5 sm:flex-row sm:items-center sm:justify-between"
               role="alert"
             >
-              <p className="text-[13px] font-medium text-[#B91C1C]">
-                Unable to load agents
-              </p>
-              <p className="mt-1 text-[12px] text-[#B91C1C]/80">
-                {error}
-              </p>
+              <div>
+                <p className="text-[15px] font-semibold text-[#B91C1C]">
+                  Unable to load agents
+                </p>
+
+                <p className="mt-1.5 text-[13px] leading-5 text-[#B91C1C]/80">
+                  {error}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => void loadAgents()}
+                className="inline-flex w-fit items-center gap-2 rounded-lg border border-[#FECACA] bg-white px-3.5 py-2 text-[13px] font-medium text-[#B91C1C] transition-colors hover:bg-[#FFF7F7] focus:outline-none focus:ring-2 focus:ring-[#DC2626]/20"
+              >
+                <RefreshCw size={14} />
+                Retry
+              </button>
+            </div>
+          ) : agents.length === 0 ? (
+            /* Empty */
+            <div className="flex min-h-[240px] items-center justify-center rounded-2xl border border-dashed border-border bg-card">
+              <div className="text-center">
+                <p className="text-[15px] font-semibold text-primary">
+                  No agents available
+                </p>
+
+                <p className="mt-1.5 text-[13px] text-faint">
+                  OneAgent has not registered any agents yet.
+                </p>
+              </div>
             </div>
           ) : (
+            /* Agents */
             <AgentsGrid agents={agents} />
           )}
         </main>

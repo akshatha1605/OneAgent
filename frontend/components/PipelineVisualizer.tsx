@@ -5,10 +5,16 @@ import {
   CheckCircle2,
   Loader2,
   Circle,
+  Activity,
 } from "lucide-react";
+
 import { pipelineSteps } from "@/lib/mock-data";
 
-type WorkflowStatus = "queued" | "running" | "completed" | "failed";
+type WorkflowStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed";
 
 type PipelineVisualizerProps = {
   activeStep?: number;
@@ -27,145 +33,222 @@ const statusConfig: Record<
 > = {
   queued: {
     label: "QUEUED",
-    className: "bg-[#F0F0EE] text-[#6B6B65]",
+    className: "bg-[#F3F4F6] text-[#6B7280]",
   },
   running: {
     label: "IN PROGRESS",
-    className: "bg-accent-tint text-[#B45309]",
+    className: "bg-[#FFF7ED] text-[#B45309]",
   },
   completed: {
     label: "COMPLETED",
-    className: "bg-success/10 text-[#15803D]",
+    className: "bg-[#EAF7EE] text-[#15803D]",
   },
   failed: {
     label: "FAILED",
-    className: "bg-red-50 text-red-700",
+    className: "bg-[#FDECEC] text-[#DC2626]",
   },
 };
 
 export default function PipelineVisualizer({
   activeStep = 0,
   status = "running",
-  title = 'Analyze churn drivers & draft report',
+  title = "Analyze churn drivers & draft report",
   agentCount = 3,
   elapsedTime = "40s",
 }: PipelineVisualizerProps) {
   const safeActiveStep = Math.max(
     0,
-    Math.min(activeStep, pipelineSteps.length - 1)
+    Math.min(
+      activeStep,
+      Math.max(0, pipelineSteps.length - 1)
+    )
   );
 
   const currentStatus = statusConfig[status];
 
   return (
-    <div className="rounded-xl border border-border bg-card p-5">
+    <div className="rounded-2xl border border-border bg-card p-6">
       {/* Header */}
-      <div className="mb-5 flex items-center justify-between gap-4">
-        <div className="min-w-0">
-          <div className="truncate text-[13px] font-semibold text-primary">
-            Live workflow &mdash; &ldquo;{title}&rdquo;
+      <div className="mb-6 flex items-start justify-between gap-5">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#FFF7ED]">
+            <Activity
+              size={17}
+              className="text-[#D97706]"
+              aria-hidden="true"
+            />
           </div>
 
-          <div className="mt-0.5 text-[12px] text-faint">
-            Orchestrating {agentCount}{" "}
-            {agentCount === 1 ? "agent" : "agents"} &middot; started{" "}
-            {elapsedTime} ago
+          <div className="min-w-0">
+            <div className="truncate text-[16px] font-semibold text-primary">
+              Live workflow
+            </div>
+
+            <div className="mt-1 truncate text-[13px] text-muted">
+              &ldquo;{title}&rdquo;
+            </div>
+
+            <div className="mt-1.5 text-[12px] text-faint">
+              Orchestrating {agentCount}{" "}
+              {agentCount === 1 ? "agent" : "agents"}{" "}
+              &middot; started {elapsedTime} ago
+            </div>
           </div>
         </div>
 
         <span
-          className={`shrink-0 rounded-full px-2 py-1 text-[11px] font-semibold ${currentStatus.className}`}
+          className={`shrink-0 rounded-full px-3 py-1.5 text-[11px] font-semibold tracking-wide ${currentStatus.className}`}
         >
           {currentStatus.label}
         </span>
       </div>
 
       {/* Pipeline */}
-      <div className="flex items-center">
-        {pipelineSteps.map((step, index) => {
-          const isCompleted =
-            status === "completed" || index < safeActiveStep;
+      <div className="overflow-x-auto pb-2">
+        <div className="flex min-w-[620px] items-start px-2">
+          {pipelineSteps.map((step, index) => {
+            const isCompleted =
+              status === "completed" ||
+              index < safeActiveStep;
 
-          const isActive =
-            status === "running" && index === safeActiveStep;
+            const isActive =
+              status === "running" &&
+              index === safeActiveStep;
 
-          const isFailed =
-            status === "failed" && index === safeActiveStep;
+            const isFailed =
+              status === "failed" &&
+              index === safeActiveStep;
 
-          return (
-            <Fragment key={step}>
-              <div className="flex min-w-[84px] flex-col items-center gap-2">
-                <div
-                  className={`relative flex h-8 w-8 items-center justify-center rounded-full transition-colors duration-300 ${
-                    isCompleted
-                      ? "bg-success"
-                      : isFailed
-                        ? "bg-red-600"
-                        : isActive
-                          ? "bg-accent"
-                          : "border border-border bg-[#F0F0EE]"
-                  }`}
-                >
-                  {isActive && (
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-40" />
-                  )}
+            const connectorCompleted =
+              index < safeActiveStep ||
+              status === "completed";
 
-                  {isCompleted ? (
-                    <CheckCircle2
-                      size={16}
-                      className="relative text-white"
-                    />
-                  ) : isFailed ? (
-                    <span className="relative text-[13px] font-bold text-white">
-                      !
-                    </span>
-                  ) : isActive ? (
-                    <Loader2
-                      size={14}
-                      className="relative animate-spin text-white"
-                    />
-                  ) : (
-                    <Circle
-                      size={8}
-                      className="text-[#C9C9C4]"
-                      fill="currentColor"
-                    />
-                  )}
+            return (
+              <Fragment key={step}>
+                {/* Step */}
+                <div className="flex w-[110px] shrink-0 flex-col items-center gap-2.5">
+                  <div
+                    className={`relative flex h-10 w-10 items-center justify-center rounded-full transition-all duration-300 ${
+                      isCompleted
+                        ? "bg-[#16A34A] shadow-sm"
+                        : isFailed
+                          ? "bg-[#DC2626] shadow-sm"
+                          : isActive
+                            ? "bg-[#D97706] shadow-sm"
+                            : "border border-[#D8D8D3] bg-[#F3F4F6]"
+                    }`}
+                  >
+                    {isActive && (
+                      <span
+                        className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#D97706] opacity-25"
+                        aria-hidden="true"
+                      />
+                    )}
+
+                    {isCompleted ? (
+                      <CheckCircle2
+                        size={18}
+                        className="relative text-white"
+                        aria-hidden="true"
+                      />
+                    ) : isFailed ? (
+                      <span className="relative text-[14px] font-bold text-white">
+                        !
+                      </span>
+                    ) : isActive ? (
+                      <Loader2
+                        size={17}
+                        className="relative animate-spin text-white"
+                        aria-hidden="true"
+                      />
+                    ) : (
+                      <Circle
+                        size={9}
+                        className="text-[#BDBDB7]"
+                        fill="currentColor"
+                        aria-hidden="true"
+                      />
+                    )}
+                  </div>
+
+                  <span
+                    className={`max-w-[105px] text-center text-[12px] font-medium leading-4 ${
+                      isCompleted ||
+                      isActive ||
+                      isFailed
+                        ? "text-primary"
+                        : "text-[#A6A6A0]"
+                    }`}
+                  >
+                    {step}
+                  </span>
                 </div>
 
-                <span
-                  className={`text-center text-[11.5px] font-medium ${
-                    isCompleted || isActive || isFailed
-                      ? "text-primary"
-                      : "text-[#B0B0AA]"
-                  }`}
-                >
-                  {step}
-                </span>
-              </div>
-
-              {index !== pipelineSteps.length - 1 && (
-                <div className="mb-5 h-[2px] flex-1 overflow-hidden rounded-full bg-[#EDEDE9]">
-                  <div
-                    className={`h-full transition-all duration-500 ${
-                      status === "failed" && index >= safeActiveStep
-                        ? "bg-red-500"
-                        : "bg-success"
-                    }`}
-                    style={{
-                      width:
-                        index < safeActiveStep ||
-                        status === "completed"
+                {/* Connector */}
+                {index !== pipelineSteps.length - 1 && (
+                  <div className="mt-5 h-1 flex-1 overflow-hidden rounded-full bg-[#EDEDE9]">
+                    <div
+                      className={`h-full rounded-full transition-all duration-500 ${
+                        status === "failed" &&
+                        index >= safeActiveStep
+                          ? "bg-[#EF4444]"
+                          : "bg-[#16A34A]"
+                      }`}
+                      style={{
+                        width: connectorCompleted
                           ? "100%"
                           : "0%",
-                    }}
-                  />
-                </div>
-              )}
-            </Fragment>
-          );
-        })}
+                      }}
+                    />
+                  </div>
+                )}
+              </Fragment>
+            );
+          })}
+        </div>
       </div>
+
+      {/* Current step indicator */}
+      {status === "running" &&
+        pipelineSteps[safeActiveStep] && (
+          <div className="mt-5 flex items-center gap-2 rounded-xl border border-[#F0F0EE] bg-background px-4 py-3">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-[#D97706]" />
+
+            <span className="text-[12px] text-muted">
+              Currently processing:
+            </span>
+
+            <span className="text-[12px] font-semibold text-primary">
+              {pipelineSteps[safeActiveStep]}
+            </span>
+          </div>
+        )}
+
+      {status === "completed" && (
+        <div className="mt-5 flex items-center gap-2 rounded-xl border border-[#DCFCE7] bg-[#F0FDF4] px-4 py-3">
+          <CheckCircle2
+            size={16}
+            className="text-[#16A34A]"
+            aria-hidden="true"
+          />
+
+          <span className="text-[12px] font-medium text-[#15803D]">
+            Workflow completed successfully.
+          </span>
+        </div>
+      )}
+
+      {status === "failed" && (
+        <div className="mt-5 flex items-center gap-2 rounded-xl border border-[#FECACA] bg-[#FEF2F2] px-4 py-3">
+          <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[#DC2626] text-[10px] font-bold text-white">
+            !
+          </span>
+
+          <span className="text-[12px] font-medium text-[#B91C1C]">
+            Workflow execution failed at the current step.
+          </span>
+        </div>
+      )}
     </div>
   );
 }

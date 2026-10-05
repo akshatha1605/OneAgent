@@ -12,27 +12,32 @@ const STYLES: Record<
     bg: string;
     text: string;
     label: string;
+    dot: string;
   }
 > = {
   running: {
-    bg: "bg-accent-tint",
+    bg: "bg-[#FFF7ED]",
     text: "text-[#B45309]",
     label: "IN PROGRESS",
+    dot: "bg-[#D97706]",
   },
   done: {
     bg: "bg-[#EAF7EE]",
-    text: "text-success",
+    text: "text-[#15803D]",
     label: "COMPLETE",
+    dot: "bg-[#16A34A]",
   },
   failed: {
     bg: "bg-[#FDECEC]",
     text: "text-[#DC2626]",
     label: "FAILED",
+    dot: "bg-[#DC2626]",
   },
   queued: {
-    bg: "bg-[#F0F0EE]",
-    text: "text-faint",
+    bg: "bg-[#F3F4F6]",
+    text: "text-[#6B7280]",
     label: "QUEUED",
+    dot: "bg-[#9CA3AF]",
   },
 };
 
@@ -47,8 +52,13 @@ export default function WorkflowStatusBadge({
 
   return (
     <span
-      className={`shrink-0 rounded-full px-2 py-1 text-[10.5px] font-semibold ${style.bg} ${style.text}`}
+      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wide ${style.bg} ${style.text}`}
     >
+      <span
+        className={`h-1.5 w-1.5 rounded-full ${style.dot}`}
+        aria-hidden="true"
+      />
+
       {style.label}
     </span>
   );

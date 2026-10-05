@@ -20,11 +20,31 @@ const ICONS = {
 };
 
 const navItems = [
-  { label: "Dashboard", icon: "layout", href: "/" },
-  { label: "Workflows", icon: "workflow", href: "/workflows" },
-  { label: "Agents", icon: "bot", href: "/agents" },
-  { label: "History", icon: "history", href: "/history" },
-  { label: "Settings", icon: "settings", href: "/settings" },
+  {
+    label: "Dashboard",
+    icon: "layout",
+    href: "/",
+  },
+  {
+    label: "Workflows",
+    icon: "workflow",
+    href: "/workflows",
+  },
+  {
+    label: "Agents",
+    icon: "bot",
+    href: "/agents",
+  },
+  {
+    label: "History",
+    icon: "history",
+    href: "/history",
+  },
+  {
+    label: "Settings",
+    icon: "settings",
+    href: "/settings",
+  },
 ] as const;
 
 type SidebarProps = {
@@ -39,23 +59,36 @@ export default function Sidebar({
   const pathname = usePathname();
 
   return (
-    <aside className="hidden w-56 shrink-0 flex-col border-r border-border bg-card px-4 py-5 md:flex">
+    <aside className="hidden w-60 shrink-0 flex-col border-r border-border bg-card px-4 py-6 md:flex">
       {/* Brand */}
-      <div className="mb-8 flex items-center gap-2 px-2">
+      <div className="mb-10 flex items-center gap-3 px-2">
         <div
-          className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-sm font-bold text-white"
+          className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-[15px] font-bold text-white shadow-sm"
           aria-hidden="true"
         >
           1
         </div>
 
-        <span className="text-[15px] font-semibold tracking-tight text-primary">
-          OneAgent
-        </span>
+        <div>
+          <div className="text-[16px] font-semibold tracking-tight text-primary">
+            OneAgent
+          </div>
+
+          <div className="mt-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-faint">
+            AI Workspace
+          </div>
+        </div>
       </div>
 
       {/* Navigation */}
-      <nav className="flex flex-col gap-0.5" aria-label="Main navigation">
+      <div className="mb-3 px-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-faint">
+        Workspace
+      </div>
+
+      <nav
+        className="flex flex-col gap-1"
+        aria-label="Main navigation"
+      >
         {navItems.map((item) => {
           const Icon = ICONS[item.icon];
 
@@ -70,44 +103,75 @@ export default function Sidebar({
               key={item.href}
               href={item.href}
               aria-current={active ? "page" : undefined}
-              className={`group flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13.5px] font-medium transition-colors ${
+              className={`group flex min-h-[43px] items-center gap-3 rounded-xl px-3 text-[14px] font-medium transition-all ${
                 active
-                  ? "bg-accent-tint text-primary"
+                  ? "bg-accent-tint text-primary shadow-sm"
                   : "text-muted hover:bg-background hover:text-primary"
               }`}
             >
-              <Icon
-                size={16.5}
-                strokeWidth={2}
-                className={active ? "text-[#D97706]" : undefined}
-                aria-hidden="true"
-              />
+              <span
+                className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
+                  active
+                    ? "bg-white text-[#D97706]"
+                    : "text-muted group-hover:text-primary"
+                }`}
+              >
+                <Icon
+                  size={18}
+                  strokeWidth={active ? 2.2 : 1.9}
+                  aria-hidden="true"
+                />
+              </span>
 
-              {item.label}
+              <span>{item.label}</span>
+
+              {active && (
+                <span
+                  className="ml-auto h-1.5 w-1.5 rounded-full bg-[#D97706]"
+                  aria-hidden="true"
+                />
+              )}
             </Link>
           );
         })}
       </nav>
 
       {/* Usage */}
-      <div className="mt-auto pt-6">
-        <div className="rounded-lg border border-border bg-background p-3">
-          <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
-            <Sparkles
-              size={12}
-              className="text-[#D97706]"
-              aria-hidden="true"
-            />
-            Usage this week
+      <div className="mt-auto pt-8">
+        <div className="mb-3 px-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-faint">
+          Usage
+        </div>
+
+        <div className="rounded-2xl border border-border bg-background p-4">
+          <div className="flex items-center gap-2 text-[12px] font-medium text-muted">
+            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#FFF7ED]">
+              <Sparkles
+                size={14}
+                className="text-[#D97706]"
+                aria-hidden="true"
+              />
+            </span>
+
+            <span>This week</span>
           </div>
 
-          <div className="text-[20px] font-semibold leading-none text-primary">
-            {weeklyAgentCalls.toLocaleString()}
+          <div className="mt-4">
+            <div className="text-[24px] font-semibold leading-none tracking-tight text-primary">
+              {weeklyAgentCalls.toLocaleString()}
+            </div>
+
+            <div className="mt-1.5 text-[12px] text-faint">
+              agent calls
+            </div>
           </div>
 
-          <div className="mt-0.5 text-[11.5px] text-faint">
-            agent calls &middot; {weeklyWorkflows}{" "}
-            {weeklyWorkflows === 1 ? "workflow" : "workflows"}
+          <div className="mt-4 border-t border-border pt-3 text-[12px] text-faint">
+            <span className="font-medium text-primary">
+              {weeklyWorkflows}
+            </span>{" "}
+            {weeklyWorkflows === 1
+              ? "workflow"
+              : "workflows"}
           </div>
         </div>
       </div>

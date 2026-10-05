@@ -1,20 +1,32 @@
 "use client";
 
 import {
-  Compass,
-  Code2,
-  PenLine,
-  Image as ImageIcon,
-  FileText,
   ArrowUp,
+  CheckCircle2,
+  Code2,
+  Compass,
+  FileText,
+  Image as ImageIcon,
+  Loader2,
+  PenLine,
   Sparkles,
+  Zap,
 } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
-import { orchestrateTask } from "@/lib/api";
+import { useCallback, useEffect, useState } from "react";
+
+import {
+  createWorkflow,
+  executeWorkflow,
+  getOrchestrationStatus,
+  getTasks,
+  type OrchestrationResponse,
+  type TaskHistoryItem,
+} from "@/lib/api";
 
 type Capability = {
   label: string;
+  description: string;
   icon: typeof Compass;
   prompt: string;
 };
@@ -22,30 +34,117 @@ type Capability = {
 const capabilities: Capability[] = [
   {
     label: "Research",
+    description: "Find and summarize information",
     icon: Compass,
     prompt: "Research this topic and give me a clear summary",
   },
   {
     label: "Coding",
+    description: "Solve programming problems",
     icon: Code2,
     prompt: "Help me solve a programming problem",
   },
   {
     label: "Writing",
+    description: "Create polished content",
     icon: PenLine,
     prompt: "Help me write something professionally",
   },
   {
     label: "Images",
+    description: "Create visual content",
     icon: ImageIcon,
     prompt: "Help me create an image",
   },
   {
     label: "Documents",
+    description: "Analyze or summarize files",
     icon: FileText,
     prompt: "Analyze or summarize a document",
   },
 ];
+
+function extractResultText(
+  response: OrchestrationResponse
+): string {
+  if (typeof response.result === "string") {
+    return response.result;
+  }
+
+  if (!response.result) {
+    return (
+      response.message ??
+      "The task was completed successfully."
+    );
+  }
+
+  const result = response.result;
+
+  if (typeof result.output === "string") {
+    return result.output;
+  }
+
+  if (typeof result.result === "string") {
+    return result.result;
+  }
+
+  if (typeof result.message === "string") {
+    return result.message;
+  }
+
+  if (typeof result.error === "string") {
+    return result.error;
+  }
+
+  return "The task was completed, but no readable output was returned.";
+}
+
+function formatActivityTime(value?: string) {
+  if (!value) {
+    return "";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  const diff = Date.now() - date.getTime();
+
+  const seconds = Math.floor(diff / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+
+  if (seconds < 60) {
+    return "just now";
+  }
+
+  if (minutes < 60) {
+    return `${minutes}m ago`;
+  }
+
+  if (hours < 24) {
+    return `${hours}h ago`;
+  }
+
+  if (days < 7) {
+    return `${days}d ago`;
+  }
+
+  return date.toLocaleDateString();
+}
+
+function formatAgentName(agent?: string | null) {
+  if (!agent) {
+    return "OneAgent";
+  }
+
+  return agent
+    .replace(/[-_]/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
 
 export default function OneAgentWorkspace() {
   const [input, setInput] = useState("");
@@ -53,6 +152,35 @@ export default function OneAgentWorkspace() {
   const [answer, setAnswer] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  const [workflowId, setWorkflowId] = useState<string | null>(
+    null
+  );
+
+  const [orchestration, setOrchestration] =
+    useState<OrchestrationResponse | null>(null);
+
+  const [recentTasks, setRecentTasks] = useState<
+    TaskHistoryItem[]
+  >([]);
+
+  const [activityLoading, setActivityLoading] =
+    useState(true);
+
+  const loadRecentTasks = useCallback(async () => {
+    try {
+      const response = await getTasks();
+      setRecentTasks(response.tasks.slice(0, 4));
+    } catch {
+      setRecentTasks([]);
+    } finally {
+      setActivityLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadRecentTasks();
+  }, [loadRecentTasks]);
 
   const submitTask = async () => {
     const task = input.trim();
@@ -65,19 +193,70 @@ export default function OneAgentWorkspace() {
     setInput("");
     setAnswer("");
     setError("");
+    setWorkflowId(null);
+    setOrchestration(null);
     setLoading(true);
 
     try {
-      const response = await orchestrateTask(task);
+      /*
+       * Step 1:
+       * Create a real persistent workflow.
+       */
+      const workflow = await createWorkflow(task);
 
-      const result =
-        response.result ??
-        response.message ??
-        (response.agent
-          ? `Task routed to ${response.agent}.`
-          : "The task was received successfully.");
+      setWorkflowId(workflow.workflow_id);
 
-      setAnswer(result);
+      /*
+       * Step 2:
+       * Execute that workflow through the real
+       * OneAgent backend orchestrator.
+       */
+      const execution = await executeWorkflow(
+  workflow.workflow_id
+);
+
+if (execution.status === "failed") {
+  setError(
+    execution.message ||
+      "OneAgent could not complete this task."
+  );
+  return;
+}
+
+const statusResponse =
+  await getOrchestrationStatus(
+    workflow.workflow_id
+  );
+
+if (statusResponse.status === "failed") {
+  setError(
+    statusResponse.error ||
+      "OneAgent could not complete this task."
+  );
+  return;
+}
+
+if (statusResponse.result) {
+  setAnswer(statusResponse.result);
+} else {
+  setAnswer(
+    statusResponse.message ||
+      "The task was completed successfully."
+  );
+}
+
+setOrchestration({
+  status: statusResponse.status,
+  result: {
+    output: statusResponse.result,
+  },
+});
+
+      /*
+       * Refresh activity so the newly completed
+       * task immediately appears in the dashboard.
+       */
+      void loadRecentTasks();
     } catch (err) {
       const message =
         err instanceof Error
@@ -108,74 +287,128 @@ export default function OneAgentWorkspace() {
     setAnswer("");
     setError("");
     setInput("");
+    setWorkflowId(null);
+    setOrchestration(null);
   };
 
   return (
-    <section className="flex flex-col gap-8">
+    <section className="mx-auto flex w-full max-w-5xl flex-col gap-8">
       {/* Hero */}
-      <div className="pt-8 text-center">
-        <h1 className="text-[28px] font-semibold tracking-tight text-primary">
-          What can I help you accomplish?
-        </h1>
+      {!question ? (
+        <div className="pt-10 text-center">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border border-border bg-card shadow-sm">
+            <Sparkles
+              size={21}
+              strokeWidth={1.8}
+              className="text-[#D97706]"
+            />
+          </div>
 
-        <p className="mt-2 text-[14px] text-muted">
-          Tell OneAgent what you need. It will figure out the best way to
-          handle it.
-        </p>
-      </div>
+          <h1 className="text-[34px] font-semibold tracking-[-0.025em] text-primary">
+            What can I help you accomplish?
+          </h1>
 
-      {/* Main input */}
-      <div className="mx-auto w-full max-w-3xl">
+          <p className="mx-auto mt-2 max-w-xl text-[16px] leading-7 text-muted">
+            Tell OneAgent what you need. It will analyze your task,
+            choose the right agent, and handle the work for you.
+          </p>
+        </div>
+      ) : (
+        <div className="pt-4">
+          <button
+            type="button"
+            onClick={startNewTask}
+            disabled={loading}
+            className="text-[13px] font-medium text-[#D97706] transition-colors hover:text-[#B45309] hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            ← New task
+          </button>
+        </div>
+      )}
+
+      {/* Main composer */}
+      <div className="mx-auto w-full max-w-4xl">
         <div
-          className={`rounded-2xl border bg-card p-2 shadow-sm transition-colors ${
+          className={`overflow-hidden rounded-2xl border bg-card shadow-sm transition-all ${
             loading
               ? "border-border"
-              : "border-border focus-within:border-[#D97706]"
+              : "border-border focus-within:border-[#D97706]/60 focus-within:shadow-[0_0_0_3px_rgba(217,119,6,0.06)]"
           }`}
         >
-          <div className="flex items-end gap-2">
-            <textarea
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  void submitTask();
-                }
-              }}
-              disabled={loading}
-              rows={2}
-              placeholder="Ask OneAgent to research, write, code, analyze..."
-              aria-label="Task for OneAgent"
-              className="flex-1 resize-none border-0 bg-transparent px-3 py-3 text-[14px] text-primary outline-none placeholder:text-faint disabled:cursor-not-allowed disabled:opacity-60"
-            />
+          <textarea
+            value={input}
+            onChange={(event) =>
+              setInput(event.target.value)
+            }
+            onKeyDown={(event) => {
+              if (
+                event.key === "Enter" &&
+                !event.shiftKey
+              ) {
+                event.preventDefault();
+                void submitTask();
+              }
+            }}
+            disabled={loading}
+            rows={3}
+            placeholder="Ask OneAgent to research, write, code, analyze..."
+            aria-label="Task for OneAgent"
+            className="block w-full resize-none border-0 bg-transparent px-5 pt-5 text-[16px] leading-7 text-primary outline-none placeholder:text-faint disabled:cursor-not-allowed disabled:opacity-60"
+          />
+
+          <div className="flex items-center justify-between px-3 pb-3 pt-2">
+            <div className="pl-2 text-[13px] text-faint">
+              {loading
+                ? "OneAgent is working on your task..."
+                : "Enter to send · Shift + Enter for a new line"}
+            </div>
 
             <button
               type="button"
               onClick={() => void submitTask()}
               disabled={!input.trim() || loading}
-              aria-label={loading ? "Processing task" : "Send task"}
-              title={loading ? "Processing task" : "Send task"}
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-white transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-30"
+              aria-label={
+                loading
+                  ? "Processing task"
+                  : "Send task"
+              }
+              title={
+                loading
+                  ? "Processing task"
+                  : "Send task"
+              }
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-white transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-25"
             >
-              <ArrowUp size={18} strokeWidth={2.2} />
+              {loading ? (
+                <Loader2
+                  size={18}
+                  className="animate-spin"
+                />
+              ) : (
+                <ArrowUp
+                  size={19}
+                  strokeWidth={2.2}
+                />
+              )}
             </button>
           </div>
-        </div>
-
-        <div className="mt-2 text-center text-[11px] text-faint">
-          Press Enter to send · Shift + Enter for a new line
         </div>
       </div>
 
       {/* Capabilities */}
       {!question && (
-        <div className="mx-auto w-full max-w-3xl">
-          <div className="mb-3 text-[12px] font-semibold text-primary">
-            Try OneAgent for
+        <div className="mx-auto w-full max-w-4xl">
+          <div className="mb-3">
+            <div className="text-[14px] font-semibold text-primary">
+              What can OneAgent do?
+            </div>
+
+            <div className="mt-0.5 text-[13px] text-faint">
+              Start with a capability or describe your own task.
+            </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-5">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
             {capabilities.map((capability) => {
               const Icon = capability.icon;
 
@@ -183,17 +416,29 @@ export default function OneAgentWorkspace() {
                 <button
                   key={capability.label}
                   type="button"
-                  onClick={() => selectCapability(capability.prompt)}
+                  onClick={() =>
+                    selectCapability(
+                      capability.prompt
+                    )
+                  }
                   disabled={loading}
-                  className="group flex flex-col items-center justify-center gap-2 rounded-xl border border-border bg-card px-3 py-4 text-[12px] font-medium text-[#374151] transition-all hover:border-[#D97706]/40 hover:bg-[#FFFBF5] disabled:cursor-not-allowed disabled:opacity-50"
+                  className="group min-h-[112px] rounded-xl border border-border bg-card p-4 text-left transition-all hover:-translate-y-0.5 hover:border-[#D97706]/40 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  <Icon
-                    size={18}
-                    strokeWidth={1.9}
-                    className="text-[#D97706] transition-transform group-hover:scale-105"
-                  />
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#FFF7ED]">
+                    <Icon
+                      size={17}
+                      strokeWidth={1.9}
+                      className="text-[#D97706]"
+                    />
+                  </div>
 
-                  {capability.label}
+                  <div className="mt-3 text-[14px] font-semibold text-primary">
+                    {capability.label}
+                  </div>
+
+                  <div className="mt-1 text-[12px] leading-5 text-faint">
+                    {capability.description}
+                  </div>
                 </button>
               );
             })}
@@ -201,68 +446,169 @@ export default function OneAgentWorkspace() {
         </div>
       )}
 
-      {/* Conversation */}
+      {/* Conversation / Result */}
       {question && (
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-5">
-          {/* User message */}
+        <div className="mx-auto flex w-full max-w-4xl flex-col gap-5">
+          {/* User task */}
           <div className="flex justify-end">
-            <div className="max-w-[80%] rounded-2xl rounded-br-md bg-primary px-4 py-3 text-[13.5px] leading-relaxed text-white">
+            <div className="max-w-[82%] rounded-2xl rounded-br-md bg-primary px-5 py-3.5 text-[15px] leading-6 text-white shadow-sm">
               {question}
             </div>
           </div>
 
-          {/* OneAgent response */}
+          {/* OneAgent */}
           <div className="flex gap-3">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-white">
-              <Sparkles size={15} />
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-white shadow-sm">
+              <Sparkles size={17} />
             </div>
 
-            <div className="flex-1 pt-1">
-              <div className="mb-2 text-[12px] font-semibold text-primary">
-                OneAgent
+            <div className="min-w-0 flex-1 pt-0.5">
+              <div className="mb-2 flex items-center gap-2">
+                <span className="text-[14px] font-semibold text-primary">
+                  OneAgent
+                </span>
+
+                {loading && (
+                  <span className="rounded-full bg-[#FFF7ED] px-2.5 py-1 text-[11px] font-medium text-[#B45309]">
+                    Working
+                  </span>
+                )}
+
+                {!loading &&
+                  !error &&
+                  answer && (
+                    <span className="flex items-center gap-1 text-[11px] font-medium text-[#15803D]">
+                      <CheckCircle2 size={12} />
+                      Completed
+                    </span>
+                  )}
               </div>
 
               {loading ? (
                 <div
-                  className="flex items-center gap-1.5 text-[13px] text-muted"
+                  className="rounded-xl border border-border bg-card px-5 py-5"
                   role="status"
                   aria-live="polite"
                 >
-                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#D97706]" />
+                  <div className="flex items-center gap-3">
+                    <div className="flex gap-1">
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#D97706]" />
 
-                  <span
-                    className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#D97706]"
-                    style={{ animationDelay: "100ms" }}
-                  />
+                      <span
+                        className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#D97706]"
+                        style={{
+                          animationDelay: "100ms",
+                        }}
+                      />
 
-                  <span
-                    className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#D97706]"
-                    style={{ animationDelay: "200ms" }}
-                  />
+                      <span
+                        className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#D97706]"
+                        style={{
+                          animationDelay: "200ms",
+                        }}
+                      />
+                    </div>
 
-                  <span className="ml-1">Processing...</span>
+                    <span className="text-[14px] text-muted">
+                      Creating workflow and executing the best
+                      agent...
+                    </span>
+                  </div>
                 </div>
               ) : error ? (
                 <div
-                  className="rounded-xl border border-[#FECACA] bg-[#FEF2F2] px-4 py-4 text-[13.5px] leading-relaxed text-[#B91C1C]"
+                  className="rounded-xl border border-[#FECACA] bg-[#FEF2F2] px-5 py-4 text-[15px] leading-6 text-[#B91C1C]"
                   role="alert"
                 >
                   {error}
+
+                  {workflowId && (
+                    <Link
+                      href={`/workflows/${workflowId}`}
+                      className="mt-3 block text-[13px] font-medium underline"
+                    >
+                      View workflow
+                    </Link>
+                  )}
                 </div>
               ) : (
-                <div className="rounded-xl border border-border bg-card px-4 py-4 text-[13.5px] leading-relaxed text-[#374151]">
-                  {answer}
-                </div>
+                <>
+                  <div className="rounded-xl border border-border bg-card px-5 py-5 text-[15px] leading-7 text-[#374151] shadow-sm whitespace-pre-wrap">
+                    {answer}
+                  </div>
+
+                  {orchestration && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {orchestration.selected_agent?.name && (
+                        <MetadataBadge
+                          label="Agent"
+                          value={
+                            orchestration
+                              .selected_agent.name
+                          }
+                        />
+                      )}
+
+                      {orchestration.model?.selected && (
+                        <MetadataBadge
+                          label="Model"
+                          value={
+                            orchestration.model.selected
+                          }
+                        />
+                      )}
+
+                      {orchestration.search?.used && (
+                        <MetadataBadge
+                          label="Search"
+                          value={
+                            orchestration.search
+                              .provider ??
+                            "Enabled"
+                          }
+                        />
+                      )}
+
+                      {typeof orchestration
+                        .routing?.confidence ===
+                        "number" && (
+                        <MetadataBadge
+                          label="Confidence"
+                          value={`${Math.round(
+                            orchestration.routing
+                              .confidence * 100
+                          )}%`}
+                        />
+                      )}
+
+                      {orchestration.model
+                        ?.fallback_used && (
+                        <MetadataBadge
+                          label="Fallback"
+                          value="Used"
+                        />
+                      )}
+
+                      {workflowId && (
+                        <Link
+                          href={`/workflows/${workflowId}`}
+                          className="rounded-md border border-[#D97706]/30 bg-[#FFFBF5] px-3 py-1.5 text-[12px] font-medium text-[#B45309] hover:bg-[#FFF7ED]"
+                        >
+                          View workflow
+                        </Link>
+                      )}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </div>
 
-          {/* New task */}
           {!loading && (
             <button
               type="button"
               onClick={startNewTask}
-              className="self-start text-[12px] font-medium text-[#D97706] hover:underline"
+              className="self-start rounded-lg border border-border bg-card px-3.5 py-2 text-[13px] font-medium text-muted transition-colors hover:border-[#D97706]/40 hover:bg-[#FFFBF5] hover:text-primary"
             >
               + Start a new task
             </button>
@@ -270,40 +616,94 @@ export default function OneAgentWorkspace() {
         </div>
       )}
 
+      {/* Overview cards */}
+      {!question && (
+        <div className="mx-auto w-full max-w-4xl">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <OverviewCard
+              icon={<Zap size={17} />}
+              title="Smart routing"
+              description="Tasks are analyzed and routed to the most suitable agent."
+            />
+
+            <OverviewCard
+              icon={<Sparkles size={17} />}
+              title="Multi-model execution"
+              description="OneAgent can select and fall back between available AI models."
+            />
+
+            <OverviewCard
+              icon={<CheckCircle2 size={17} />}
+              title="Execution history"
+              description="Completed tasks and routing details are saved for later review."
+            />
+          </div>
+        </div>
+      )}
+
       {/* Recent activity */}
       {!question && (
-        <div className="mx-auto w-full max-w-3xl pt-2">
-          <div className="mb-3 flex items-center justify-between">
-            <div className="text-[12px] font-semibold text-primary">
-              Recent activity
+        <div className="mx-auto w-full max-w-4xl pb-6">
+          <div className="mb-3 flex items-end justify-between">
+            <div>
+              <div className="text-[14px] font-semibold text-primary">
+                Recent activity
+              </div>
+
+              <div className="mt-0.5 text-[13px] text-faint">
+                Your latest OneAgent executions.
+              </div>
             </div>
 
             <Link
               href="/history"
-              className="text-[11.5px] font-medium text-[#D97706] hover:underline"
+              className="text-[13px] font-medium text-[#D97706] hover:underline"
             >
               View all
             </Link>
           </div>
 
-          <div className="divide-y divide-[#F0F0EE] rounded-xl border border-border bg-card">
-            <ActivityItem
-              title="Competitor pricing brief"
-              detail="Research · Writing"
-              time="12m ago"
-            />
+          <div className="overflow-hidden rounded-xl border border-border bg-card">
+            {activityLoading ? (
+              <div className="px-5 py-6 text-[13px] text-faint">
+                Loading recent activity...
+              </div>
+            ) : recentTasks.length === 0 ? (
+              <div className="px-5 py-8 text-center">
+                <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-lg bg-[#FFF7ED]">
+                  <Sparkles
+                    size={17}
+                    className="text-[#D97706]"
+                  />
+                </div>
 
-            <ActivityItem
-              title="Refactor auth middleware"
-              detail="Coding"
-              time="48m ago"
-            />
+                <div className="mt-3 text-[14px] font-medium text-primary">
+                  No recent tasks
+                </div>
 
-            <ActivityItem
-              title="Product launch deck"
-              detail="Research · Writing · Images"
-              time="2h ago"
-            />
+                <div className="mt-1 text-[13px] text-faint">
+                  Run your first task above and it will appear here.
+                </div>
+              </div>
+            ) : (
+              recentTasks.map((task) => (
+                <ActivityItem
+                  key={task.id}
+                  title={task.task}
+                  detail={`${formatAgentName(
+                    task.agent
+                  )}${
+                    task.model
+                      ? ` · ${task.model}`
+                      : ""
+                  }`}
+                  time={formatActivityTime(
+                    task.created_at
+                  )}
+                  status={task.status}
+                />
+              ))
+            )}
           </div>
         </div>
       )}
@@ -311,26 +711,86 @@ export default function OneAgentWorkspace() {
   );
 }
 
+function MetadataBadge({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <span className="rounded-md border border-border bg-card px-3 py-1.5 text-[12px] text-faint">
+      <span className="text-muted">{label}:</span>{" "}
+      <span className="font-medium text-primary">
+        {value}
+      </span>
+    </span>
+  );
+}
+
+function OverviewCard({
+  icon,
+  title,
+  description,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="rounded-xl border border-border bg-card px-4 py-4">
+      <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#FFF7ED] text-[#D97706]">
+        {icon}
+      </div>
+
+      <div className="mt-3 text-[14px] font-semibold text-primary">
+        {title}
+      </div>
+
+      <div className="mt-1 text-[12px] leading-5 text-faint">
+        {description}
+      </div>
+    </div>
+  );
+}
+
 function ActivityItem({
   title,
   detail,
   time,
+  status,
 }: {
   title: string;
   detail: string;
   time: string;
+  status: string;
 }) {
+  const failed = status === "failed";
+
   return (
-    <div className="flex items-center justify-between px-4 py-3.5">
-      <div className="min-w-0">
-        <div className="truncate text-[12.5px] font-medium text-primary">
+    <div className="flex items-center gap-3 border-b border-[#F0F0EE] px-5 py-4 last:border-b-0">
+      <span
+        className={`h-2.5 w-2.5 shrink-0 rounded-full ${
+          failed
+            ? "bg-[#DC2626]"
+            : "bg-[#16A34A]"
+        }`}
+        aria-hidden="true"
+      />
+
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[14px] font-medium text-primary">
           {title}
         </div>
 
-        <div className="mt-0.5 text-[11px] text-faint">{detail}</div>
+        <div className="mt-0.5 text-[12px] text-faint">
+          {detail}
+        </div>
       </div>
 
-      <div className="ml-4 shrink-0 text-[10.5px] text-faint">{time}</div>
+      <div className="ml-3 shrink-0 text-[12px] text-faint">
+        {time}
+      </div>
     </div>
   );
 }

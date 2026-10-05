@@ -1,32 +1,25 @@
-from datetime import datetime
 import uuid
-
-
-from fastapi.middleware.cors import CORSMiddleware
+from datetime import datetime
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-
-from app.agents.registry import (
-    get_all_agents,
-    get_agent,
-)
-from dotenv import load_dotenv
-from app.orchestrator import Orchestrator
-
-from app.database.database import (
-    Base,
-    engine,
-    get_db,
-)
+from app.agents.registry import get_all_agents, get_agent
+from app.database.database import Base, engine, get_db
+from app.database.models import Workflow
 from app.database.repository import (
-    save_orchestration,
+    add_workflow_step,
+    create_workflow,
     get_recent_tasks,
+    get_workflow,
+    get_workflows,
+    save_orchestration,
+    update_workflow_status,
 )
+from app.orchestrator import Orchestrator
 
 
 # ============================================================
@@ -46,7 +39,6 @@ app = FastAPI(
     description="Intelligent Multi-Agent AI Orchestration Platform",
 )
 
-# Create database tables if they do not already exist.
 Base.metadata.create_all(bind=engine)
 
 
@@ -67,7 +59,7 @@ app.add_middleware(
 
 
 # ============================================================
-# REQUEST / RESPONSE MODELS
+# REQUEST MODELS
 # ============================================================
 
 
@@ -184,7 +176,7 @@ async def update_profile(profile: UserProfile):
 @app.get("/api/agents", tags=["Agents"])
 async def get_agents():
     return {
-        "agents": get_all_agents()
+        "agents": get_all_agents(),
     }
 
 
@@ -194,9 +186,10 @@ async def get_agent_details(agent_id: str):
     agent = get_agent(agent_id)
 
     if not agent:
-        return {
-            "error": "Agent not found"
-        }
+        raise HTTPException(
+            status_code=404,
+            detail="Agent not found",
+        )
 
     return agent
 
@@ -207,37 +200,84 @@ async def get_agent_details(agent_id: str):
 
 
 @app.post("/api/workflows", tags=["Workflows"])
-async def create_workflow(workflow: WorkflowCreate):
+async def create_workflow_endpoint(
+    workflow_data: WorkflowCreate,
+    db: Session = Depends(get_db),
+):
+    """
+    Create and persist a real workflow.
+    """
 
-    workflow_id = f"wf_{uuid.uuid4().hex[:8]}"
+    if not workflow_data.task.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Task cannot be empty",
+        )
+
+    workflow = create_workflow(
+        db=db,
+        task=workflow_data.task.strip(),
+    )
+
+    # Initial workflow pipeline.
+    # These are persisted workflow steps, not hardcoded
+    # frontend-only demo data.
+    add_workflow_step(
+        db=db,
+        workflow=workflow,
+        name="Task Analysis",
+        step_order=1,
+    )
+
+    add_workflow_step(
+        db=db,
+        workflow=workflow,
+        name="Agent Selection",
+        step_order=2,
+    )
+
+    add_workflow_step(
+        db=db,
+        workflow=workflow,
+        name="Execution",
+        step_order=3,
+    )
+
+    add_workflow_step(
+        db=db,
+        workflow=workflow,
+        name="Result Generation",
+        step_order=4,
+    )
 
     return {
-        "workflow_id": workflow_id,
+        "workflow_id": workflow.id,
         "task": workflow.task,
-        "status": "queued",
-        "created_at": datetime.now().isoformat(),
+        "status": workflow.status,
+        "created_at": workflow.created_at.isoformat(),
     }
 
 
 @app.get("/api/workflows", tags=["Workflows"])
-async def get_workflows():
+async def get_workflows_endpoint(
+    db: Session = Depends(get_db),
+):
+    """
+    Return persisted workflows.
+    """
+
+    workflows = get_workflows(db)
+
     return {
         "workflows": [
             {
-                "workflow_id": "wf_001",
-                "task": "Prepare competitor analysis",
-                "status": "running",
-            },
-            {
-                "workflow_id": "wf_002",
-                "task": "Create project documentation",
-                "status": "completed",
-            },
-            {
-                "workflow_id": "wf_003",
-                "task": "Analyze source code",
-                "status": "failed",
-            },
+                "workflow_id": workflow.id,
+                "task": workflow.task,
+                "status": workflow.status,
+                "created_at": workflow.created_at.isoformat(),
+                "updated_at": workflow.updated_at.isoformat(),
+            }
+            for workflow in workflows
         ]
     }
 
@@ -246,24 +286,40 @@ async def get_workflows():
     "/api/workflows/{workflow_id}",
     tags=["Workflows"],
 )
-async def get_workflow(workflow_id: str):
+async def get_workflow_endpoint(
+    workflow_id: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Return a persisted workflow and its steps.
+    """
+
+    workflow = get_workflow(
+        db=db,
+        workflow_id=workflow_id,
+    )
+
+    if not workflow:
+        raise HTTPException(
+            status_code=404,
+            detail="Workflow not found",
+        )
 
     return {
-        "workflow_id": workflow_id,
-        "status": "running",
+        "workflow_id": workflow.id,
+        "task": workflow.task,
+        "status": workflow.status,
+        "created_at": workflow.created_at.isoformat(),
+        "updated_at": workflow.updated_at.isoformat(),
         "tasks": [
             {
-                "name": "Research",
-                "status": "completed",
-            },
-            {
-                "name": "Analysis",
-                "status": "running",
-            },
-            {
-                "name": "Report Generation",
-                "status": "queued",
-            },
+                "id": step.id,
+                "name": step.name,
+                "status": step.status,
+                "step_order": step.step_order,
+                "task_id": step.task_id,
+            }
+            for step in workflow.steps
         ],
     }
 
@@ -272,30 +328,109 @@ async def get_workflow(workflow_id: str):
     "/api/workflows/{workflow_id}/execute",
     tags=["Workflows"],
 )
-async def execute_workflow(workflow_id: str):
+async def execute_workflow(
+    workflow_id: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Execute the workflow through the real OneAgent orchestrator.
+    """
 
-    return {
-        "workflow_id": workflow_id,
-        "status": "running",
-        "message": "Workflow execution started",
-    }
+    workflow = get_workflow(
+        db=db,
+        workflow_id=workflow_id,
+    )
+
+    if not workflow:
+        raise HTTPException(
+            status_code=404,
+            detail="Workflow not found",
+        )
+
+    update_workflow_status(
+        db=db,
+        workflow=workflow,
+        status="running",
+    )
+
+    try:
+        # Mark first pipeline step as running.
+        if workflow.steps:
+            workflow.steps[0].status = "running"
+            db.commit()
+
+        response = await orchestrator.process(
+            task=workflow.task,
+        )
+
+        # Persist the actual orchestration result.
+        saved_task = save_orchestration(
+            db=db,
+            task_text=workflow.task,
+            response=response,
+        )
+
+        # Mark pipeline steps according to execution result.
+        for step in workflow.steps:
+            if step.name == "Task Analysis":
+                step.status = "completed"
+
+            elif step.name == "Agent Selection":
+                step.status = "completed"
+
+            elif step.name == "Execution":
+                step.status = (
+                    "completed"
+                    if response.get("status") == "completed"
+                    else "failed"
+                )
+
+            elif step.name == "Result Generation":
+                step.status = (
+                    "completed"
+                    if response.get("status") == "completed"
+                    else "failed"
+                )
+
+            step.task_id = saved_task.id
+
+        final_status = (
+            "completed"
+            if response.get("status") == "completed"
+            else "failed"
+        )
+
+        update_workflow_status(
+            db=db,
+            workflow=workflow,
+            status=final_status,
+        )
+
+        return {
+            "workflow_id": workflow.id,
+            "status": final_status,
+            "task_id": saved_task.id,
+            "result": response,
+        }
+
+    except Exception as exc:
+
+        update_workflow_status(
+            db=db,
+            workflow=workflow,
+            status="failed",
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc),
+        )
 
 
 # ============================================================
 # ORCHESTRATION
 # ============================================================
 
-# OneAgent's central orchestration engine.
-#
-# The orchestrator owns:
-#   - Task Analyzer
-#   - Agent selection
-#   - Model selection
-#   - Search provider selection
-#   - Agent execution
-#   - Model fallback
-#
-# Agents are NOT directly instantiated here.
 
 orchestrator = Orchestrator()
 
@@ -310,11 +445,11 @@ async def orchestrate(
 ):
     """
     Execute a task through the OneAgent orchestrator
-    and persist the execution result in the database.
+    and persist the execution result.
     """
 
     response = await orchestrator.process(
-        task=request.task
+        task=request.task,
     )
 
     save_orchestration(
@@ -330,12 +465,41 @@ async def orchestrate(
     "/api/orchestrate/{workflow_id}/status",
     tags=["Orchestration"],
 )
-async def orchestration_status(workflow_id: str):
+async def orchestration_status(
+    workflow_id: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Return the actual workflow status and AI result.
+    """
+
+    workflow = get_workflow(
+        db=db,
+        workflow_id=workflow_id,
+    )
+
+    if not workflow:
+        raise HTTPException(
+            status_code=404,
+            detail="Workflow not found",
+        )
+
+    output = None
+    error = None
+
+    # Find the task created for this workflow execution.
+    for step in workflow.steps:
+        if step.task_id and step.task:
+            if step.task.result:
+                output = step.task.result.output
+                error = step.task.result.error
+                break
 
     return {
-        "workflow_id": workflow_id,
-        "status": "completed",
-        "result": "Task processing completed successfully.",
+        "workflow_id": workflow.id,
+        "status": workflow.status,
+        "result": output,
+        "error": error,
     }
 
 
@@ -351,7 +515,7 @@ async def orchestration_status(workflow_id: str):
 async def analyze_task(request: TaskRequest):
 
     analysis = await orchestrator.analyzer.analyze(
-        request.task
+        request.task,
     )
 
     return analysis.model_dump()
@@ -401,4 +565,3 @@ async def get_tasks(
             for task in tasks
         ]
     }
-

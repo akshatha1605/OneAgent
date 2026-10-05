@@ -1,37 +1,38 @@
-# ============================================================
-# ONEAGENT - AGENT REGISTRY
-# ============================================================
+from typing import Dict, Type
+
+from app.agents.base_agent import BaseAgent
+from app.agents.coding_agent import CodingAgent
+from app.agents.research_agent import ResearchAgent
+from app.agents.writing_agent import WritingAgent
+from app.agents.document_agent import DocumentAgent
+
+from app.models.model_adapter import ModelAdapter
+from app.search.search_adapter import SearchAdapter
+
 
 AGENT_REGISTRY = {
-
-    "gemini": {
-        "id": "gemini",
-        "name": "Gemini",
-        "type": "General AI",
-        "description": "General-purpose AI agent for everyday tasks.",
-        "capabilities": [
-            "general_question",
-            "reasoning",
-            "summarization",
-            "conversation"
-        ],
-        "plan": "Free",
-        "status": "available",
-    },
 
     "research": {
         "id": "research",
         "name": "Research Agent",
         "type": "Web Research",
-        "description": "Agent specialized in research and information gathering.",
+        "description": (
+            "Agent specialized in research, information gathering, "
+            "research papers, articles, and current information."
+        ),
         "capabilities": [
             "research",
             "information_search",
+            "web_search",
+            "paper_search",
+            "article_search",
             "fact_finding",
             "comparison",
-            "summarization"
+            "summarization",
         ],
-        "plan": "Free",
+        "tools": [
+            "search",
+        ],
         "status": "available",
     },
 
@@ -39,15 +40,17 @@ AGENT_REGISTRY = {
         "id": "coding",
         "name": "Code Agent",
         "type": "Programming",
-        "description": "Agent specialized in programming and software development.",
+        "description": (
+            "Agent specialized in programming and software development."
+        ),
         "capabilities": [
             "programming",
             "code_generation",
             "debugging",
             "code_explanation",
-            "algorithm_design"
+            "algorithm_design",
         ],
-        "plan": "Free",
+        "tools": [],
         "status": "available",
     },
 
@@ -55,15 +58,17 @@ AGENT_REGISTRY = {
         "id": "writing",
         "name": "Writing Agent",
         "type": "Content Creation",
-        "description": "Agent specialized in creating and improving written content.",
+        "description": (
+            "Agent specialized in creating and improving written content."
+        ),
         "capabilities": [
             "writing",
             "rewriting",
             "content_generation",
             "editing",
-            "summarization"
+            "summarization",
         ],
-        "plan": "Free",
+        "tools": [],
         "status": "available",
     },
 
@@ -71,47 +76,71 @@ AGENT_REGISTRY = {
         "id": "document",
         "name": "Document Agent",
         "type": "Document Preparation",
-        "description": "Agent specialized in structured document preparation.",
+        "description": (
+            "Agent specialized in structured document preparation."
+        ),
         "capabilities": [
             "document_generation",
             "report_generation",
             "documentation",
-            "formatting"
+            "formatting",
         ],
-        "plan": "Free",
+        "tools": [],
         "status": "available",
-    },
-
-    "gpt-advanced": {
-        "id": "gpt-advanced",
-        "name": "Advanced GPT",
-        "type": "Advanced Reasoning",
-        "description": "Advanced reasoning agent available for Pro users.",
-        "capabilities": [
-            "advanced_reasoning",
-            "complex_analysis",
-            "planning"
-        ],
-        "plan": "Pro",
-        "status": "premium",
     },
 }
 
 
+AGENT_IMPLEMENTATIONS: Dict[str, Type[BaseAgent]] = {
+    "coding": CodingAgent,
+    "research": ResearchAgent,
+    "writing": WritingAgent,
+    "document": DocumentAgent,
+}
+
+
 def get_all_agents():
-    """Return all registered agents."""
+    """Return metadata for all registered agents."""
     return list(AGENT_REGISTRY.values())
 
 
 def get_agent(agent_id: str):
-    """Return a specific agent by ID."""
+    """Return metadata for a specific agent."""
     return AGENT_REGISTRY.get(agent_id)
 
 
 def find_agents_by_capability(capability: str):
-    """Find agents that support a given capability."""
+    """Return all registered agents supporting a capability."""
+    capability = capability.lower().strip()
+
     return [
         agent
         for agent in AGENT_REGISTRY.values()
         if capability in agent["capabilities"]
+        and agent["status"] == "available"
     ]
+
+
+def get_agent_implementation(
+    agent_id: str,
+    model: ModelAdapter,
+    search: SearchAdapter | None = None,
+):
+    """
+    Create an executable agent with its required dependencies.
+    """
+
+    agent_class = AGENT_IMPLEMENTATIONS.get(agent_id)
+
+    if not agent_class:
+        return None
+
+    if agent_id == "research":
+        return agent_class(
+            model=model,
+            search=search,
+        )
+
+    return agent_class(
+        model=model,
+    )

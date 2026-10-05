@@ -2,15 +2,26 @@ from datetime import datetime
 import uuid
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from app.agents.registry import (
     get_all_agents,
     get_agent,
 )
 from app.orchestrator import Orchestrator
+
+from app.database.database import (
+    Base,
+    engine,
+    get_db,
+)
+from app.database.repository import (
+    save_orchestration,
+    get_recent_tasks,
+)
 
 
 # ============================================================
@@ -29,6 +40,9 @@ app = FastAPI(
     version="1.0.0",
     description="Intelligent Multi-Agent AI Orchestration Platform",
 )
+
+# Create database tables if they do not already exist.
+Base.metadata.create_all(bind=engine)
 
 
 # ============================================================
@@ -223,7 +237,10 @@ async def get_workflows():
     }
 
 
-@app.get("/api/workflows/{workflow_id}", tags=["Workflows"])
+@app.get(
+    "/api/workflows/{workflow_id}",
+    tags=["Workflows"],
+)
 async def get_workflow(workflow_id: str):
 
     return {
@@ -282,11 +299,26 @@ orchestrator = Orchestrator()
     "/api/orchestrate",
     tags=["Orchestration"],
 )
-async def orchestrate(request: TaskRequest):
+async def orchestrate(
+    request: TaskRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Execute a task through the OneAgent orchestrator
+    and persist the execution result in the database.
+    """
 
-    return await orchestrator.process(
+    response = await orchestrator.process(
         task=request.task
     )
+
+    save_orchestration(
+        db=db,
+        task_text=request.task,
+        response=response,
+    )
+
+    return response
 
 
 @app.get(
@@ -306,6 +338,7 @@ async def orchestration_status(workflow_id: str):
 # TASK ANALYSIS
 # ============================================================
 
+
 @app.post(
     "/api/analyze",
     tags=["Orchestration"],
@@ -317,3 +350,50 @@ async def analyze_task(request: TaskRequest):
     )
 
     return analysis.model_dump()
+
+
+# ============================================================
+# TASK HISTORY
+# ============================================================
+
+
+@app.get(
+    "/api/tasks",
+    tags=["Tasks"],
+)
+async def get_tasks(
+    db: Session = Depends(get_db),
+):
+    """
+    Return recently persisted OneAgent tasks.
+    """
+
+    tasks = get_recent_tasks(db)
+
+    return {
+        "tasks": [
+            {
+                "id": task.id,
+                "task": task.task_text,
+                "status": task.status,
+                "created_at": task.created_at.isoformat(),
+                "agent": (
+                    task.execution.agent_id
+                    if task.execution
+                    else None
+                ),
+                "model": (
+                    task.execution.model
+                    if task.execution
+                    else None
+                ),
+                "confidence": (
+                    task.execution.routing_confidence
+                    if task.execution
+                    else None
+                ),
+            }
+            for task in tasks
+        ]
+    }
+

@@ -1,9 +1,13 @@
 import os
 from typing import Any, Dict
 
+from dotenv import load_dotenv
 from google import genai
 
 from app.models.model_adapter import ModelAdapter
+
+
+load_dotenv()
 
 
 class GeminiAdapter(ModelAdapter):

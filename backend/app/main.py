@@ -3,16 +3,14 @@ from pydantic import BaseModel
 from typing import List
 from datetime import datetime
 import uuid
-<<<<<<< HEAD
+
 from fastapi.middleware.cors import CORSMiddleware
-=======
+
 from app.agents.registry import (
     get_all_agents,
     get_agent,
 )
 from dotenv import load_dotenv
->>>>>>> d5ebc22a36678347f626534361d252fe2ab30561
-
 load_dotenv()
 app = FastAPI(
     title="OneAgent API",

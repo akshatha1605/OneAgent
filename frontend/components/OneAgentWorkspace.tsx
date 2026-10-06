@@ -70,12 +70,44 @@ export default function OneAgentWorkspace() {
     try {
       const response = await orchestrateTask(task);
 
-      const result =
-        response.result ??
-        response.message ??
-        (response.agent
-          ? `Task routed to ${response.agent}.`
-          : "The task was received successfully.");
+      /*
+       * The backend may return:
+       *
+       * result: "actual answer"
+       *
+       * OR:
+       *
+       * result: {
+       *   agent_id: "...",
+       *   agent_name: "...",
+       *   status: "...",
+       *   task: "...",
+       *   result: "actual answer",
+       *   metadata: {...}
+       * }
+       *
+       * Extract the actual text before sending it to React.
+       */
+
+      const rawResult = response.result;
+
+      let result: string;
+
+      if (typeof rawResult === "string") {
+        result = rawResult;
+      } else if (
+        rawResult &&
+        typeof rawResult === "object" &&
+        typeof rawResult.result === "string"
+      ) {
+        result = rawResult.result;
+      } else if (response.message) {
+        result = response.message;
+      } else if (response.agent) {
+        result = `Task routed to ${response.agent}.`;
+      } else {
+        result = "The task was received successfully.";
+      }
 
       setAnswer(result);
     } catch (err) {
@@ -250,7 +282,7 @@ export default function OneAgentWorkspace() {
                   {error}
                 </div>
               ) : (
-                <div className="rounded-xl border border-border bg-card px-4 py-4 text-[13.5px] leading-relaxed text-[#374151]">
+                <div className="rounded-xl border border-border bg-card px-4 py-4 text-[13.5px] leading-relaxed text-[#374151] whitespace-pre-wrap">
                   {answer}
                 </div>
               )}
@@ -330,7 +362,9 @@ function ActivityItem({
         <div className="mt-0.5 text-[11px] text-faint">{detail}</div>
       </div>
 
-      <div className="ml-4 shrink-0 text-[10.5px] text-faint">{time}</div>
+      <div className="ml-4 shrink-0 text-[10.5px] text-faint">
+        {time}
+      </div>
     </div>
   );
 }

@@ -102,16 +102,34 @@ export type WorkflowDetailResponse = {
   tasks: WorkflowTask[];
 };
 
-export type OrchestrationRequest = {
-  task: string;
+/* -------------------------------------------------------------------------- */
+/* Orchestration Types                                                        */
+/* -------------------------------------------------------------------------- */
+
+export type OrchestrationResult = {
+  agent_id?: string;
+  agent_name?: string;
+  status?: string;
+  task?: string;
+  result?: string;
+  metadata?: Record<string, unknown>;
 };
 
 export type OrchestrationResponse = {
   workflow_id?: string;
   workflowId?: string;
+
   agent?: string;
   status?: string;
-  result?: string;
+  task?: string;
+
+  analysis?: Record<string, unknown>;
+  routing?: Record<string, unknown>;
+  selected_agent?: Record<string, unknown>;
+  models?: Record<string, unknown>;
+  search?: Record<string, unknown>;
+
+  result?: string | OrchestrationResult;
   message?: string;
 };
 
@@ -162,7 +180,7 @@ export function getWorkflows() {
 }
 
 export function getWorkflow(workflowId: string) {
-  return request<WorkflowDetailResponse >(
+  return request<WorkflowDetailResponse>(
     `/api/workflows/${encodeURIComponent(workflowId)}`
   );
 }
@@ -179,6 +197,10 @@ export function executeWorkflow(workflowId: string) {
 /* -------------------------------------------------------------------------- */
 /* Orchestration                                                              */
 /* -------------------------------------------------------------------------- */
+
+export type OrchestrationRequest = {
+  task: string;
+};
 
 export function orchestrateTask(task: string) {
   return request<OrchestrationResponse>("/api/orchestrate", {

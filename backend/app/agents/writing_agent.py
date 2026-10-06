@@ -32,6 +32,10 @@ Instructions:
 - Match the requested tone and format.
 - Do not invent requirements.
 - Return only useful content with a brief explanation when appropriate.
+- Keep the response concise and directly focused on the task.
+- Return the response using Markdown when appropriate.
+- Use headings, bullet points, or numbered lists when they improve readability.
+- Avoid unnecessary introductions and repetition.
 """
 
             response = await self.model.generate(

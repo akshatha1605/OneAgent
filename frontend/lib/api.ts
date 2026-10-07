@@ -71,6 +71,101 @@ export type HealthResponse = {
   service: string;
 };
 
+<<<<<<< HEAD
+=======
+export type BackendAgent = {
+  id: string;
+  name: string;
+  provider?: string;
+  type?: "llm" | "tool" | string;
+  status?: "online" | "idle" | "offline" | string;
+  description?: string;
+  capabilities?: string[];
+  callsToday?: number;
+};
+
+export type WorkflowStatus =
+  | "running"
+  | "done"
+  | "failed"
+  | "queued";
+
+export type AgentsResponse = {
+  agents: BackendAgent[];
+};
+
+export type BackendWorkflow = {
+  id?: string;
+  workflow_id?: string;
+  title?: string;
+  task?: string;
+  description?: string;
+  status?: string;
+  agents?: string[];
+  createdAt?: string;
+  duration?: string;
+  progress?: number;
+};
+
+export type WorkflowTask = {
+  name: string;
+  status: "queued" | "running" | "completed" | "failed" | string;
+};
+
+export type WorkflowDetailResponse = {
+  workflow_id: string;
+  status: "queued" | "running" | "completed" | "failed" | string;
+  tasks: WorkflowTask[];
+};
+
+/* -------------------------------------------------------------------------- */
+/* Orchestration Types                                                        */
+/* -------------------------------------------------------------------------- */
+
+export type OrchestrationResult = {
+  agent_id?: string;
+  agent_name?: string;
+  status?: string;
+  task?: string;
+  result?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type OrchestrationResponse = {
+  workflow_id?: string;
+  workflowId?: string;
+
+  agent?: string;
+  status?: string;
+  task?: string;
+
+  analysis?: Record<string, unknown>;
+  routing?: Record<string, unknown>;
+  selected_agent?: Record<string, unknown>;
+  models?: Record<string, unknown>;
+  search?: Record<string, unknown>;
+
+  result?: string | OrchestrationResult;
+  message?: string;
+};
+
+export type WorkflowStatusResponse = {
+  workflow_id?: string;
+  workflowId?: string;
+  status?: string;
+  active_step?: number;
+  activeStep?: number;
+  progress?: number;
+  agents?: BackendAgent[];
+  result?: string;
+  error?: string;
+};
+
+/* -------------------------------------------------------------------------- */
+/* Health                                                                     */
+/* -------------------------------------------------------------------------- */
+
+>>>>>>> 9d5924dc5829cb2becf5c30b7fb66266f792c74f
 export function getHealth() {
   return request<HealthResponse>("/api/health");
 }
@@ -192,6 +287,7 @@ export type OrchestrationRequest = {
   task: string;
 };
 
+<<<<<<< HEAD
 export type OrchestrationAnalysis = {
   [key: string]: unknown;
 };
@@ -247,6 +343,8 @@ export type OrchestrationResponse = {
   message?: string;
 };
 
+=======
+>>>>>>> 9d5924dc5829cb2becf5c30b7fb66266f792c74f
 export function orchestrateTask(task: string) {
   return request<OrchestrationResponse>("/api/orchestrate", {
     method: "POST",

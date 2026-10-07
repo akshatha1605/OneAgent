@@ -32,6 +32,10 @@ Instructions:
 - Keep the document professional and readable.
 - Include sections requested by the user.
 - Do not invent requirements.
+- Keep the response concise and directly focused on the task.
+- Return the response using Markdown when appropriate.
+- Use headings, bullet points, or numbered lists when they improve readability.
+- Avoid unnecessary introductions and repetition.
 - Return the complete structured document content.
 """
 

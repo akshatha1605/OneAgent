@@ -51,7 +51,14 @@ Instructions:
 - Compare information when requested.
 - Do not invent sources or facts.
 - Do not claim to have searched the web if no search results were provided.
-- Provide a concise, useful research response.
+- Keep the response concise and directly answer the user's task.
+- Format the response using Markdown.
+- Use a short heading when appropriate.
+- Use bullet points or numbered lists for multiple points.
+- Use tables only when they make a comparison clearer.
+- Use code blocks when code is relevant.
+- Avoid unnecessary introductions, repetition, and long explanations.
+- Do not include a separate "Conclusion" section unless it adds useful information.
 """
 
             response = await self.model.generate(

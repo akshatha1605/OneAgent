@@ -40,6 +40,11 @@ Instructions:
 - Explain the solution briefly.
 - Mention important edge cases when relevant.
 - Do not invent requirements that were not given.
+- Keep the response concise and directly focused on the task.
+- Return the response using Markdown.
+- Use headings when they improve clarity.
+- Put code inside appropriate code blocks.
+- Avoid unnecessary introductions and repetition.
 """
 
             response = await self.model.generate(

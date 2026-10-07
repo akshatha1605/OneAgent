@@ -204,7 +204,48 @@ export default function OneAgentWorkspace() {
        */
       const workflow = await createWorkflow(task);
 
+<<<<<<< HEAD
       setWorkflowId(workflow.workflow_id);
+=======
+      /*
+       * The backend may return:
+       *
+       * result: "actual answer"
+       *
+       * OR:
+       *
+       * result: {
+       *   agent_id: "...",
+       *   agent_name: "...",
+       *   status: "...",
+       *   task: "...",
+       *   result: "actual answer",
+       *   metadata: {...}
+       * }
+       *
+       * Extract the actual text before sending it to React.
+       */
+
+      const rawResult = response.result;
+
+      let result: string;
+
+      if (typeof rawResult === "string") {
+        result = rawResult;
+      } else if (
+        rawResult &&
+        typeof rawResult === "object" &&
+        typeof rawResult.result === "string"
+      ) {
+        result = rawResult.result;
+      } else if (response.message) {
+        result = response.message;
+      } else if (response.agent) {
+        result = `Task routed to ${response.agent}.`;
+      } else {
+        result = "The task was received successfully.";
+      }
+>>>>>>> 9d5924dc5829cb2becf5c30b7fb66266f792c74f
 
       /*
        * Step 2:
@@ -532,6 +573,7 @@ setOrchestration({
                   )}
                 </div>
               ) : (
+<<<<<<< HEAD
                 <>
                   <div className="rounded-xl border border-border bg-card px-5 py-5 text-[15px] leading-7 text-[#374151] shadow-sm whitespace-pre-wrap">
                     {answer}
@@ -600,6 +642,11 @@ setOrchestration({
                     </div>
                   )}
                 </>
+=======
+                <div className="rounded-xl border border-border bg-card px-4 py-4 text-[13.5px] leading-relaxed text-[#374151] whitespace-pre-wrap">
+                  {answer}
+                </div>
+>>>>>>> 9d5924dc5829cb2becf5c30b7fb66266f792c74f
               )}
             </div>
           </div>
@@ -788,7 +835,11 @@ function ActivityItem({
         </div>
       </div>
 
+<<<<<<< HEAD
       <div className="ml-3 shrink-0 text-[12px] text-faint">
+=======
+      <div className="ml-4 shrink-0 text-[10.5px] text-faint">
+>>>>>>> 9d5924dc5829cb2becf5c30b7fb66266f792c74f
         {time}
       </div>
     </div>

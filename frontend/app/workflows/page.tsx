@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Activity,
   RefreshCw,
@@ -12,7 +13,24 @@ import TopBar from "@/components/TopBar";
 import WorkflowsList, {
   type Workflow,
 } from "@/components/WorkflowsList";
-import { getWorkflows } from "@/lib/api";
+import {
+  addWorkflowStep,
+  createWorkflow,
+  getWorkflows,
+} from "@/lib/api";
+
+const AGENT_OPTIONS = [
+  { value: "auto", label: "Auto" },
+  { value: "research", label: "Research" },
+  { value: "coding", label: "Coding" },
+  { value: "writing", label: "Writing" },
+  { value: "document", label: "Document" },
+] as const;
+
+type WorkflowStepDraft = {
+  instruction: string;
+  agentId: (typeof AGENT_OPTIONS)[number]["value"];
+};
 
 function formatWorkflowTime(createdAt?: string): string {
   if (!createdAt) {
@@ -53,9 +71,17 @@ function normalizeStatus(
 }
 
 export default function WorkflowsPage() {
+  const router = useRouter();
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [showCreate, setShowCreate] = useState(false);
+  const [workflowTitle, setWorkflowTitle] = useState("");
+  const [workflowSteps, setWorkflowSteps] = useState<WorkflowStepDraft[]>([
+    { instruction: "", agentId: "auto" },
+  ]);
+  const [creating, setCreating] = useState(false);
+  const [validationError, setValidationError] = useState("");
 
   const loadWorkflows = useCallback(async () => {
     try {
@@ -81,9 +107,14 @@ export default function WorkflowsPage() {
           ),
 
           agents: ["OneAgent"],
+          stepCount: workflow.step_count ?? 0,
 
           createdAt: formatWorkflowTime(
             workflow.created_at
+          ),
+
+          updatedAt: formatWorkflowTime(
+            workflow.updated_at
           ),
 
           duration: "—",
@@ -108,7 +139,59 @@ export default function WorkflowsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [router]);
+
+  const handleCreate = async () => {
+    const title = workflowTitle.trim();
+    const steps = workflowSteps.map((step) => ({
+      instruction: step.instruction.trim(),
+      agentId: step.agentId,
+    }));
+
+    if (!title) {
+      setValidationError("Workflow name is required.");
+      return;
+    }
+
+    if (steps.length === 0) {
+      setValidationError("Add at least one workflow step.");
+      return;
+    }
+
+    if (steps.some((step) => !step.instruction)) {
+      setValidationError(
+        "Each step needs an instruction. Remove blank lines and try again."
+      );
+      return;
+    }
+
+    try {
+      setCreating(true);
+      setError("");
+      setValidationError("");
+      const workflow = await createWorkflow(title);
+      for (const [index, step] of steps.entries()) {
+        await addWorkflowStep(
+          workflow.workflow_id,
+          step.instruction,
+          index + 1,
+          step.agentId
+        );
+      }
+      setWorkflowTitle("");
+      setWorkflowSteps([{ instruction: "", agentId: "auto" }]);
+      setShowCreate(false);
+      router.push(`/workflows/${workflow.workflow_id}`);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to create workflow."
+      );
+    } finally {
+      setCreating(false);
+    }
+  };
 
   useEffect(() => {
     void loadWorkflows();
@@ -154,6 +237,13 @@ export default function WorkflowsPage() {
 
             {!loading && !error && (
               <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCreate((value) => !value)}
+                  className="rounded-xl bg-primary px-4 py-2.5 text-[13px] font-medium text-white"
+                >
+                  {showCreate ? "Cancel" : "Create workflow"}
+                </button>
                 <SummaryBadge
                   label="Total"
                   value={workflows.length}
@@ -171,6 +261,164 @@ export default function WorkflowsPage() {
                 />
               </div>
             )}
+
+          {showCreate && (
+            <div className="rounded-2xl border border-border bg-card p-5">
+                  <h2 className="text-[17px] font-semibold text-primary">
+                    Create workflow
+                  </h2>
+                  <p className="mt-1 text-[13px] text-muted">
+                    Add steps below, choose an agent, and reorder them before saving.
+                  </p>
+                  <input
+                    value={workflowTitle}
+                    onChange={(event) => setWorkflowTitle(event.target.value)}
+                    aria-label="Workflow name"
+                    placeholder="Workflow name"
+                    className="mt-4 w-full rounded-lg border border-border bg-background px-3 py-2.5 text-[14px] text-primary outline-none focus:border-accent"
+                  />
+                  <div className="mt-4 space-y-3">
+                    {workflowSteps.map((step, index) => (
+                      <div
+                        key={index}
+                        className="rounded-xl border border-border bg-background p-3"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <label
+                            htmlFor={`workflow-step-${index}`}
+                            className="text-[12px] font-semibold text-muted"
+                          >
+                            Step {index + 1}
+                          </label>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setWorkflowSteps((current) => {
+                                  if (index === 0) return current;
+                                  const next = [...current];
+                                  [next[index - 1], next[index]] = [
+                                    next[index],
+                                    next[index - 1],
+                                  ];
+                                  return next;
+                                })
+                              }
+                              disabled={index === 0}
+                              className="rounded px-2 py-1 text-[12px] text-muted disabled:opacity-30"
+                              aria-label={`Move step ${index + 1} up`}
+                            >
+                              ↑
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setWorkflowSteps((current) => {
+                                  if (index === current.length - 1) return current;
+                                  const next = [...current];
+                                  [next[index], next[index + 1]] = [
+                                    next[index + 1],
+                                    next[index],
+                                  ];
+                                  return next;
+                                })
+                              }
+                              disabled={index === workflowSteps.length - 1}
+                              className="rounded px-2 py-1 text-[12px] text-muted disabled:opacity-30"
+                              aria-label={`Move step ${index + 1} down`}
+                            >
+                              ↓
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setWorkflowSteps((current) =>
+                                  current.length === 1
+                                    ? current
+                                    : current.filter((_, item) => item !== index)
+                                )
+                              }
+                              disabled={workflowSteps.length === 1}
+                              className="rounded px-2 py-1 text-[12px] text-[#B91C1C] disabled:opacity-30"
+                              aria-label={`Remove step ${index + 1}`}
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                        <textarea
+                          id={`workflow-step-${index}`}
+                          value={step.instruction}
+                          onChange={(event) =>
+                            setWorkflowSteps((current) =>
+                              current.map((item, itemIndex) =>
+                                itemIndex === index
+                                  ? { ...item, instruction: event.target.value }
+                                  : item
+                              )
+                            )
+                          }
+                          placeholder="Step instruction"
+                          rows={2}
+                          className="mt-2 w-full resize-y rounded-lg border border-border bg-card px-3 py-2.5 text-[14px] leading-6 text-primary outline-none focus:border-accent"
+                        />
+                        <label className="mt-2 flex items-center gap-2 text-[12px] text-muted">
+                          Agent
+                          <select
+                            value={step.agentId}
+                            onChange={(event) =>
+                              setWorkflowSteps((current) =>
+                                current.map((item, itemIndex) =>
+                                  itemIndex === index
+                                    ? {
+                                        ...item,
+                                        agentId: event.target
+                                          .value as WorkflowStepDraft["agentId"],
+                                      }
+                                    : item
+                                )
+                              )
+                            }
+                            className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-[12px] text-primary outline-none focus:border-accent"
+                            aria-label={`Agent for step ${index + 1}`}
+                          >
+                            {AGENT_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setWorkflowSteps((current) => [
+                        ...current,
+                        { instruction: "", agentId: "auto" },
+                      ])
+                    }
+                    className="mt-3 rounded-lg border border-border px-3 py-2 text-[13px] font-medium text-primary"
+                  >
+                    Add step
+                  </button>
+                  {validationError && (
+                    <p className="mt-2 text-[13px] text-[#B91C1C]" role="alert">
+                      {validationError}
+                    </p>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void handleCreate()}
+                    disabled={creating}
+                    className="mt-3 rounded-lg bg-primary px-4 py-2 text-[13px] font-medium text-white disabled:opacity-50"
+                  >
+                    {creating ? "Creating..." : "Save workflow"}
+                  </button>
+            </div>
+          )}
           </div>
 
           {/* Loading */}

@@ -71,101 +71,6 @@ export type HealthResponse = {
   service: string;
 };
 
-<<<<<<< HEAD
-=======
-export type BackendAgent = {
-  id: string;
-  name: string;
-  provider?: string;
-  type?: "llm" | "tool" | string;
-  status?: "online" | "idle" | "offline" | string;
-  description?: string;
-  capabilities?: string[];
-  callsToday?: number;
-};
-
-export type WorkflowStatus =
-  | "running"
-  | "done"
-  | "failed"
-  | "queued";
-
-export type AgentsResponse = {
-  agents: BackendAgent[];
-};
-
-export type BackendWorkflow = {
-  id?: string;
-  workflow_id?: string;
-  title?: string;
-  task?: string;
-  description?: string;
-  status?: string;
-  agents?: string[];
-  createdAt?: string;
-  duration?: string;
-  progress?: number;
-};
-
-export type WorkflowTask = {
-  name: string;
-  status: "queued" | "running" | "completed" | "failed" | string;
-};
-
-export type WorkflowDetailResponse = {
-  workflow_id: string;
-  status: "queued" | "running" | "completed" | "failed" | string;
-  tasks: WorkflowTask[];
-};
-
-/* -------------------------------------------------------------------------- */
-/* Orchestration Types                                                        */
-/* -------------------------------------------------------------------------- */
-
-export type OrchestrationResult = {
-  agent_id?: string;
-  agent_name?: string;
-  status?: string;
-  task?: string;
-  result?: string;
-  metadata?: Record<string, unknown>;
-};
-
-export type OrchestrationResponse = {
-  workflow_id?: string;
-  workflowId?: string;
-
-  agent?: string;
-  status?: string;
-  task?: string;
-
-  analysis?: Record<string, unknown>;
-  routing?: Record<string, unknown>;
-  selected_agent?: Record<string, unknown>;
-  models?: Record<string, unknown>;
-  search?: Record<string, unknown>;
-
-  result?: string | OrchestrationResult;
-  message?: string;
-};
-
-export type WorkflowStatusResponse = {
-  workflow_id?: string;
-  workflowId?: string;
-  status?: string;
-  active_step?: number;
-  activeStep?: number;
-  progress?: number;
-  agents?: BackendAgent[];
-  result?: string;
-  error?: string;
-};
-
-/* -------------------------------------------------------------------------- */
-/* Health                                                                     */
-/* -------------------------------------------------------------------------- */
-
->>>>>>> 9d5924dc5829cb2becf5c30b7fb66266f792c74f
 export function getHealth() {
   return request<HealthResponse>("/api/health");
 }
@@ -214,7 +119,9 @@ export type BackendWorkflow = {
   workflow_id: string;
   task: string;
   status: WorkflowStatus;
+  step_count?: number;
   created_at?: string;
+  updated_at?: string;
 };
 
 export type WorkflowsResponse = {
@@ -226,13 +133,24 @@ export function getWorkflows() {
 }
 
 export type WorkflowTask = {
+  id?: number;
   name: string;
   status: WorkflowStatus;
+  step_order?: number;
+  agent_id?: string | null;
+  task_id?: string | null;
+  selected_agent?: string | null;
+  model?: string | null;
+  result?: Record<string, unknown> | string | null;
+  error?: string | null;
 };
 
 export type WorkflowDetailResponse = {
   workflow_id: string;
+  task?: string;
   status: WorkflowStatus;
+  created_at?: string;
+  updated_at?: string;
   tasks: WorkflowTask[];
 };
 
@@ -251,6 +169,7 @@ export type CreateWorkflowResponse = {
   task: string;
   status: WorkflowStatus;
   created_at: string;
+  updated_at: string;
 };
 
 export function createWorkflow(task: string) {
@@ -260,6 +179,67 @@ export function createWorkflow(task: string) {
       task,
     } satisfies CreateWorkflowRequest),
   });
+}
+
+export type AddWorkflowStepResponse = WorkflowTask;
+
+export function addWorkflowStep(
+  workflowId: string,
+  name: string,
+  stepOrder?: number,
+  agentId?: string
+) {
+  return request<AddWorkflowStepResponse>(
+    `/api/workflows/${encodeURIComponent(workflowId)}/steps`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        name,
+        ...(stepOrder === undefined
+          ? {}
+          : { step_order: stepOrder }),
+        ...(agentId === undefined
+          ? {}
+          : { agent_id: agentId }),
+      }),
+    }
+  );
+}
+
+export type UpdateWorkflowStepRequest = {
+  name: string;
+  step_order: number;
+  agent_id: string;
+};
+
+export function updateWorkflowStep(
+  workflowId: string,
+  stepId: number,
+  data: UpdateWorkflowStepRequest
+) {
+  return request<WorkflowTask>(
+    `/api/workflows/${encodeURIComponent(workflowId)}/steps/${stepId}`,
+    {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }
+  );
+}
+
+export function deleteWorkflowStep(
+  workflowId: string,
+  stepId: number
+) {
+  return request<{
+    workflow_id: string;
+    deleted_step_id: number;
+    steps: WorkflowTask[];
+  }>(
+    `/api/workflows/${encodeURIComponent(workflowId)}/steps/${stepId}`,
+    {
+      method: "DELETE",
+    }
+  );
 }
 
 export type ExecuteWorkflowResponse = {
@@ -280,6 +260,106 @@ export function executeWorkflow(workflowId: string) {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Conversations                                                              */
+/* -------------------------------------------------------------------------- */
+
+export type Conversation = {
+  conversation_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ConversationsResponse = {
+  conversations: Conversation[];
+};
+
+export type CreateConversationResponse = {
+  conversation_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export function createConversation(title = "New Chat") {
+  return request<CreateConversationResponse>("/api/conversations", {
+    method: "POST",
+    body: JSON.stringify({
+      title,
+    }),
+  });
+}
+
+/**
+ * Return all conversations for the chat sidebar.
+ */
+export function getConversations() {
+  return request<ConversationsResponse>("/api/conversations");
+}
+
+/* -------------------------------------------------------------------------- */
+/* Conversation Messages                                                     */
+/* -------------------------------------------------------------------------- */
+
+export type ChatMessageRole = "user" | "assistant";
+
+export type ChatMessage = {
+  id: string;
+  role: ChatMessageRole;
+  content: string;
+  model?: string | null;
+  agent_id?: string | null;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  total_tokens?: number | null;
+  task_id?: string | null;
+  created_at: string;
+};
+
+export type ConversationDetailResponse = {
+  conversation_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  messages: ChatMessage[];
+};
+
+export function getConversation(conversationId: string) {
+  return request<ConversationDetailResponse>(
+    `/api/conversations/${encodeURIComponent(conversationId)}`
+  );
+}
+
+export type SendMessageRequest = {
+  content: string;
+};
+
+export type SendMessageResponse = {
+  conversation_id: string;
+
+  user_message: ChatMessage;
+
+  assistant_message: ChatMessage;
+
+  orchestration: OrchestrationResponse;
+};
+
+export function sendConversationMessage(
+  conversationId: string,
+  content: string
+) {
+  return request<SendMessageResponse>(
+    `/api/conversations/${encodeURIComponent(conversationId)}/messages`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        content,
+      } satisfies SendMessageRequest),
+    }
+  );
+}
+
+/* -------------------------------------------------------------------------- */
 /* Orchestration                                                              */
 /* -------------------------------------------------------------------------- */
 
@@ -287,7 +367,6 @@ export type OrchestrationRequest = {
   task: string;
 };
 
-<<<<<<< HEAD
 export type OrchestrationAnalysis = {
   [key: string]: unknown;
 };
@@ -320,6 +399,13 @@ export type OrchestrationResult = {
   result?: string;
   message?: string;
   error?: string;
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    total_tokens?: number;
+    prompt_tokens?: number;
+    completion_tokens?: number;
+  };
   [key: string]: unknown;
 };
 
@@ -339,12 +425,18 @@ export type OrchestrationResponse = {
 
   result?: OrchestrationResult;
 
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    total_tokens?: number;
+    prompt_tokens?: number;
+    completion_tokens?: number;
+  };
+
   error?: string;
   message?: string;
 };
 
-=======
->>>>>>> 9d5924dc5829cb2becf5c30b7fb66266f792c74f
 export function orchestrateTask(task: string) {
   return request<OrchestrationResponse>("/api/orchestrate", {
     method: "POST",

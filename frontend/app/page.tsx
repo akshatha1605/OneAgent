@@ -4,13 +4,19 @@ import OneAgentWorkspace from "@/components/OneAgentWorkspace";
 
 export default function DashboardPage() {
   return (
-    <div className="flex min-h-screen w-full bg-background">
+    <div className="flex h-dvh w-full min-h-0 min-w-0 overflow-hidden bg-background">
+      {/* Fixed sidebar */}
       <Sidebar />
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <TopBar />
+      {/* Right side of application */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        {/* Fixed top bar */}
+        <div className="shrink-0">
+          <TopBar />
+        </div>
 
-        <main className="flex-1 overflow-auto px-4 py-5 sm:px-6 sm:py-6">
+        {/* Workspace area */}
+        <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
           <OneAgentWorkspace />
         </main>
       </div>

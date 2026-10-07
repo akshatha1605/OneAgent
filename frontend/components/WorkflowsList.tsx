@@ -23,7 +23,9 @@ export type Workflow = {
   description: string;
   status: WorkflowStatus;
   agents: string[];
+  stepCount?: number;
   createdAt: string;
+  updatedAt?: string;
   duration: string;
   progress?: number;
 };
@@ -181,7 +183,7 @@ export default function WorkflowsList({
         {workflows.length === 0 ? (
           <EmptyState
             title="No workflows yet"
-            description="Workflows you create will appear here."
+            description="Create your first workflow to chain multiple AI tasks."
           />
         ) : filteredWorkflows.length === 0 ? (
           <EmptyState
@@ -244,6 +246,13 @@ export default function WorkflowsList({
 
                   {/* Metadata */}
                   <div className="mt-3 flex flex-wrap items-center gap-2.5">
+                    {typeof workflow.stepCount === "number" && (
+                      <span className="text-[11px] text-faint">
+                        {workflow.stepCount}{" "}
+                        {workflow.stepCount === 1 ? "step" : "steps"}
+                      </span>
+                    )}
+
                     {workflow.agents.length > 0 && (
                       <div className="flex flex-wrap items-center gap-1.5">
                         {workflow.agents.map((agent) => (
@@ -264,6 +273,13 @@ export default function WorkflowsList({
                       />
                       {workflow.createdAt}
                     </span>
+
+                    {workflow.updatedAt &&
+                      workflow.updatedAt !== workflow.createdAt && (
+                        <span className="text-[11px] text-faint">
+                          Updated {workflow.updatedAt}
+                        </span>
+                      )}
 
                     {workflow.duration !== "—" && (
                       <span className="rounded-md bg-[#F8F8F7] px-2 py-1 font-mono text-[11px] text-faint">

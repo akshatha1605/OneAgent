@@ -1,9 +1,4 @@
 {
-<<<<<<< HEAD
-  "/page": "app/page.js",
   "/workflows/page": "app/workflows/page.js",
   "/workflows/[id]/page": "app/workflows/[id]/page.js"
-=======
-  "/page": "app/page.js"
->>>>>>> 9d5924dc5829cb2becf5c30b7fb66266f792c74f
 }

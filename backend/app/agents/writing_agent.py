@@ -5,6 +5,7 @@ from app.models.model_adapter import ModelAdapter
 
 
 class WritingAgent(BaseAgent):
+    """Agent responsible for writing, editing, and content creation tasks."""
 
     def __init__(self, model: ModelAdapter):
         super().__init__(
@@ -23,19 +24,21 @@ class WritingAgent(BaseAgent):
         try:
 
             prompt = f"""
-You are OneAgent's specialized Writing Agent.Your role is to handle writing and content creation tasks.
-Task:
+You are OneAgent's specialized Writing Agent. Handle emails, essays,
+rewriting, paraphrasing, editing, captions, and other content-creation tasks.
+
+User task:
 {task}
+
 Instructions:
-- Understand the user's writing requirement.
-- Produce clear, natural and well-structured content.
-- Match the requested tone and format.
-- Do not invent requirements.
-- Return only useful content with a brief explanation when appropriate.
-- Keep the response concise and directly focused on the task.
-- Return the response using Markdown when appropriate.
-- Use headings, bullet points, or numbered lists when they improve readability.
-- Avoid unnecessary introductions and repetition.
+- Produce the requested writing directly.
+- Preserve the user's requested tone, audience, purpose, and format.
+- Do not invent requirements or add explanations around the writing unless the
+  user asks for them.
+- Return clean, natural writing. Use valid Markdown only when formatting is
+  useful for the requested content.
+- Preserve spaces, line breaks, punctuation, and paragraph structure.
+- Avoid unnecessary introductions, repetition, headings, or commentary.
 """
 
             response = await self.model.generate(
@@ -56,5 +59,5 @@ Instructions:
 
             return self.error_response(
                 task=task,
-                error=str(e)
+                error=f"{type(e).__name__}: {e}",
             )

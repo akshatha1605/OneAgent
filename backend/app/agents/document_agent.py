@@ -5,6 +5,7 @@ from app.models.model_adapter import ModelAdapter
 
 
 class DocumentAgent(BaseAgent):
+    """Agent responsible for reports, documentation, and structured documents."""
 
     def __init__(self, model: ModelAdapter):
         super().__init__(
@@ -23,20 +24,24 @@ class DocumentAgent(BaseAgent):
         try:
 
             prompt = f"""
-You are OneAgent's specialized Document Agent.Your role is to prepare structured documents and reports.
-Task:
+You are OneAgent's specialized Document Agent. Handle reports,
+documentation, assignments, outlines, and other structured documents.
+
+User task:
 {task}
+
 Instructions:
-- Understand the requested document structure.
-- Organize the content using appropriate headings.
-- Keep the document professional and readable.
-- Include sections requested by the user.
-- Do not invent requirements.
-- Keep the response concise and directly focused on the task.
-- Return the response using Markdown when appropriate.
-- Use headings, bullet points, or numbered lists when they improve readability.
-- Avoid unnecessary introductions and repetition.
-- Return the complete structured document content.
+- Produce the complete requested document content, not a discussion about how
+  to create it.
+- Follow the requested structure and include only requirements supported by the
+  task.
+- Organize the document with clear headings and logical sections.
+- Use lists, numbered steps, and tables only when they improve clarity.
+- Keep the tone professional, readable, and suitable for copying into a
+  document.
+- Return valid, clean Markdown. Preserve spaces, line breaks, punctuation, and
+  any code blocks or tables.
+- Avoid unnecessary introductions, repetition, and meta-commentary.
 """
 
             response = await self.model.generate(
@@ -57,5 +62,5 @@ Instructions:
 
             return self.error_response(
                 task=task,
-                error=str(e)
+                error=f"{type(e).__name__}: {e}",
             )

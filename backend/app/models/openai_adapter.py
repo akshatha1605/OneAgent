@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 from typing import Any, Dict
 
@@ -38,6 +39,12 @@ class OpenAIAdapter(ModelAdapter):
     ) -> str:
 
         last_error = None
+        prompt_with_context = prompt
+        if context:
+            prompt_with_context += (
+                "\n\nContext from previous workflow steps:\n"
+                + json.dumps(context, ensure_ascii=False, default=str)
+            )
 
         for attempt in range(self.max_retries):
 
@@ -45,7 +52,7 @@ class OpenAIAdapter(ModelAdapter):
 
                 response = self.client.responses.create(
                     model=self.model,
-                    input=prompt
+                    input=prompt_with_context
                 )
 
                 content = response.output_text

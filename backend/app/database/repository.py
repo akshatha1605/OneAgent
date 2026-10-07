@@ -1,15 +1,139 @@
 import json
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy.orm import Session
+# Keep the repository importable when SQLAlchemy is not installed in the
+# type-checking environment; Session is used only for annotations here.
+Session = Any
 
 from app.database.models import (
+    Conversation,
     Execution,
+    Message,
     Result,
     Task,
     Workflow,
     WorkflowStep,
 )
+
+
+# ============================================================
+# CONVERSATIONS
+# ============================================================
+
+
+def create_conversation(
+    db: Session,
+    title: str = "New Chat",
+) -> Conversation:
+
+    conversation = Conversation(
+        title=title,
+    )
+
+    db.add(conversation)
+    db.commit()
+    db.refresh(conversation)
+
+    return conversation
+
+
+def get_conversations(
+    db: Session,
+    limit: int = 50,
+):
+    return (
+        db.query(Conversation)
+        .order_by(Conversation.updated_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+
+def get_conversation(
+    db: Session,
+    conversation_id: str,
+):
+    return (
+        db.query(Conversation)
+        .filter(Conversation.id == conversation_id)
+        .first()
+    )
+
+
+def update_conversation_title(
+    db: Session,
+    conversation: Conversation,
+    title: str,
+):
+    conversation.title = title
+    conversation.updated_at = datetime.utcnow()
+
+    db.add(conversation)
+    db.commit()
+    db.refresh(conversation)
+
+    return conversation
+
+
+# ============================================================
+# MESSAGES
+# ============================================================
+
+
+def create_message(
+    db: Session,
+    conversation_id: str,
+    role: str,
+    content: str,
+    model: str | None = None,
+    agent_id: str | None = None,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+    total_tokens: int | None = None,
+    task_id: str | None = None,
+) -> Message:
+
+    message = Message(
+        conversation_id=conversation_id,
+        role=role,
+        content=content,
+        model=model,
+        agent_id=agent_id,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=total_tokens,
+        task_id=task_id,
+    )
+
+    db.add(message)
+
+    conversation = (
+        db.query(Conversation)
+        .filter(Conversation.id == conversation_id)
+        .first()
+    )
+
+    if conversation:
+        conversation.updated_at = datetime.utcnow()
+        db.add(conversation)
+
+    db.commit()
+    db.refresh(message)
+
+    return message
+
+
+def get_conversation_messages(
+    db: Session,
+    conversation_id: str,
+):
+    return (
+        db.query(Message)
+        .filter(Message.conversation_id == conversation_id)
+        .order_by(Message.created_at.asc())
+        .all()
+    )
 
 
 # ============================================================
@@ -130,12 +254,14 @@ def add_workflow_step(
     workflow: Workflow,
     name: str,
     step_order: int,
+    agent_id: str | None = None,
 ) -> WorkflowStep:
 
     step = WorkflowStep(
         workflow_id=workflow.id,
         name=name,
         step_order=step_order,
+        agent_id=agent_id,
         status="queued",
     )
 

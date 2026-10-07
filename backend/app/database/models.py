@@ -1,10 +1,130 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, Text
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, Text  # pyright: ignore[reportMissingImports]
+from sqlalchemy.orm import Mapped, mapped_column, relationship  # pyright: ignore[reportMissingImports]
 
 from app.database.database import Base
+
+
+# ============================================================
+# CONVERSATION
+# ============================================================
+
+
+class Conversation(Base):
+    __tablename__ = "conversations"
+
+    id: Mapped[str] = mapped_column(
+        Text,
+        primary_key=True,
+        default=lambda: f"conv_{uuid.uuid4().hex[:10]}",
+    )
+
+    title: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default="New Chat",
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        nullable=False,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+    messages: Mapped[list["Message"]] = relationship(
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        order_by="Message.created_at",
+    )
+
+
+# ============================================================
+# MESSAGE
+# ============================================================
+
+
+class Message(Base):
+    __tablename__ = "messages"
+
+    id: Mapped[str] = mapped_column(
+        Text,
+        primary_key=True,
+        default=lambda: f"msg_{uuid.uuid4().hex[:10]}",
+    )
+
+    conversation_id: Mapped[str] = mapped_column(
+        ForeignKey("conversations.id"),
+        nullable=False,
+    )
+
+    role: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+
+    content: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+
+    # --------------------------------------------------------
+    # AI metadata
+    # --------------------------------------------------------
+
+    model: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    agent_id: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    input_tokens: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    output_tokens: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    total_tokens: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    # --------------------------------------------------------
+    # Related task
+    # --------------------------------------------------------
+
+    task_id: Mapped[str | None] = mapped_column(
+        ForeignKey("tasks.id"),
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        nullable=False,
+    )
+
+    conversation: Mapped["Conversation"] = relationship(
+        back_populates="messages",
+    )
+
+    task: Mapped["Task | None"] = relationship()
 
 
 # ============================================================
@@ -84,6 +204,11 @@ class WorkflowStep(Base):
     name: Mapped[str] = mapped_column(
         Text,
         nullable=False,
+    )
+
+    agent_id: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
     )
 
     status: Mapped[str] = mapped_column(

@@ -50,5 +50,6 @@ class BaseAgent(ABC):
             "status": "failed",
             "task": task,
             "result": None,
+            "metadata": {},
             "error": error,
         }

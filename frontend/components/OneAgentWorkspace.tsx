@@ -9,19 +9,22 @@ import {
   Image as ImageIcon,
   Loader2,
   PenLine,
+  Plus,
   Sparkles,
-  Zap,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 import {
-  createWorkflow,
-  executeWorkflow,
-  getOrchestrationStatus,
-  getTasks,
-  type OrchestrationResponse,
-  type TaskHistoryItem,
+  createConversation,
+  getConversation,
+  getConversations,
+  sendConversationMessage,
+  type ChatMessage,
+  type Conversation,
+  type ConversationDetailResponse,
 } from "@/lib/api";
 
 type Capability = {
@@ -64,81 +67,37 @@ const capabilities: Capability[] = [
   },
 ];
 
-function extractResultText(
-  response: OrchestrationResponse
-): string {
-  if (typeof response.result === "string") {
-    return response.result;
+function formatTokens(message: ChatMessage) {
+  if (typeof message.total_tokens === "number") {
+    return `${message.total_tokens.toLocaleString()} tokens`;
   }
 
-  if (!response.result) {
-    return (
-      response.message ??
-      "The task was completed successfully."
-    );
+  if (
+    typeof message.input_tokens === "number" &&
+    typeof message.output_tokens === "number"
+  ) {
+    const total =
+      message.input_tokens + message.output_tokens;
+
+    return `${total.toLocaleString()} tokens`;
   }
 
-  const result = response.result;
-
-  if (typeof result.output === "string") {
-    return result.output;
-  }
-
-  if (typeof result.result === "string") {
-    return result.result;
-  }
-
-  if (typeof result.message === "string") {
-    return result.message;
-  }
-
-  if (typeof result.error === "string") {
-    return result.error;
-  }
-
-  return "The task was completed, but no readable output was returned.";
+  return null;
 }
 
-function formatActivityTime(value?: string) {
-  if (!value) {
-    return "";
+function formatModelName(model?: string | null) {
+  if (!model) {
+    return null;
   }
 
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return "";
-  }
-
-  const diff = Date.now() - date.getTime();
-
-  const seconds = Math.floor(diff / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  const days = Math.floor(hours / 24);
-
-  if (seconds < 60) {
-    return "just now";
-  }
-
-  if (minutes < 60) {
-    return `${minutes}m ago`;
-  }
-
-  if (hours < 24) {
-    return `${hours}h ago`;
-  }
-
-  if (days < 7) {
-    return `${days}d ago`;
-  }
-
-  return date.toLocaleDateString();
+  return model
+    .replace(/[-_]/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-function formatAgentName(agent?: string | null) {
+function getAgentName(agent?: string | null) {
   if (!agent) {
-    return "OneAgent";
+    return null;
   }
 
   return agent
@@ -147,164 +106,233 @@ function formatAgentName(agent?: string | null) {
 }
 
 export default function OneAgentWorkspace() {
+  const [conversations, setConversations] = useState<
+    Conversation[]
+  >([]);
+
+  const [activeConversationId, setActiveConversationId] =
+    useState<string | null>(null);
+
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+
   const [input, setInput] = useState("");
-  const [question, setQuestion] = useState("");
-  const [answer, setAnswer] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const [workflowId, setWorkflowId] = useState<string | null>(
-    null
+  const messagesEndRef =
+    useRef<HTMLDivElement | null>(null);
+
+  const activeConversation = conversations.find(
+    (conversation) =>
+      conversation.conversation_id ===
+      activeConversationId
   );
 
-  const [orchestration, setOrchestration] =
-    useState<OrchestrationResponse | null>(null);
-
-  const [recentTasks, setRecentTasks] = useState<
-    TaskHistoryItem[]
-  >([]);
-
-  const [activityLoading, setActivityLoading] =
-    useState(true);
-
-  const loadRecentTasks = useCallback(async () => {
-    try {
-      const response = await getTasks();
-      setRecentTasks(response.tasks.slice(0, 4));
-    } catch {
-      setRecentTasks([]);
-    } finally {
-      setActivityLoading(false);
-    }
+  /*
+   * Scroll ONLY the chat container.
+   */
+  const scrollToBottom = useCallback(() => {
+    requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "end",
+      });
+    });
   }, []);
 
+  /*
+   * Load conversations silently.
+   *
+   * They are kept in the backend but are NOT displayed
+   * as a chat organizer/sidebar.
+   */
   useEffect(() => {
-    void loadRecentTasks();
-  }, [loadRecentTasks]);
+    const loadConversations = async () => {
+      try {
+        const response = await getConversations();
 
-  const submitTask = async () => {
-    const task = input.trim();
+        setConversations(response.conversations);
 
-    if (!task || loading) {
+        if (
+          !activeConversationId &&
+          response.conversations.length > 0
+        ) {
+          setActiveConversationId(
+            response.conversations[0].conversation_id
+          );
+        }
+      } catch {
+        /*
+         * A fresh chat can still be created if
+         * conversation loading fails.
+         */
+      }
+    };
+
+    void loadConversations();
+  }, [activeConversationId]);
+
+  /*
+   * Load the active conversation.
+   */
+  useEffect(() => {
+    if (!activeConversationId) {
       return;
     }
 
-    setQuestion(task);
+    const loadConversation = async () => {
+      try {
+        setError("");
+
+        const response: ConversationDetailResponse =
+          await getConversation(activeConversationId);
+
+        setMessages(response.messages);
+
+        scrollToBottom();
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Unable to load this conversation."
+        );
+      }
+    };
+
+    void loadConversation();
+  }, [activeConversationId, scrollToBottom]);
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, loading, scrollToBottom]);
+
+  /*
+   * Start a new conversation.
+   */
+  const startNewChat = () => {
+    if (loading) {
+      return;
+    }
+
+    setActiveConversationId(null);
+    setMessages([]);
     setInput("");
-    setAnswer("");
     setError("");
-    setWorkflowId(null);
-    setOrchestration(null);
+  };
+
+  /*
+   * Create a conversation only when the first
+   * message is sent.
+   */
+  const ensureConversation = async () => {
+    if (activeConversationId) {
+      return activeConversationId;
+    }
+
+    const response = await createConversation("New Chat");
+
+    const conversationId =
+      response.conversation_id;
+
+    setActiveConversationId(conversationId);
+
+    setConversations((current) => [
+      {
+        conversation_id: conversationId,
+        title: "New Chat",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      ...current,
+    ]);
+
+    return conversationId;
+  };
+
+  /*
+   * Send message to backend/orchestrator.
+   */
+  const sendMessage = async () => {
+    const content = input.trim();
+
+    if (!content || loading) {
+      return;
+    }
+
+    setInput("");
+    setError("");
     setLoading(true);
 
+    const temporaryUserMessage: ChatMessage = {
+      id: `temp_user_${Date.now()}`,
+      role: "user",
+      content,
+      model: null,
+      agent_id: null,
+      input_tokens: null,
+      output_tokens: null,
+      total_tokens: null,
+      task_id: null,
+      created_at: new Date().toISOString(),
+    };
+
+    setMessages((current) => [
+      ...current,
+      temporaryUserMessage,
+    ]);
+
     try {
-      /*
-       * Step 1:
-       * Create a real persistent workflow.
-       */
-      const workflow = await createWorkflow(task);
+      const conversationId =
+        await ensureConversation();
 
-<<<<<<< HEAD
-      setWorkflowId(workflow.workflow_id);
-=======
-      /*
-       * The backend may return:
-       *
-       * result: "actual answer"
-       *
-       * OR:
-       *
-       * result: {
-       *   agent_id: "...",
-       *   agent_name: "...",
-       *   status: "...",
-       *   task: "...",
-       *   result: "actual answer",
-       *   metadata: {...}
-       * }
-       *
-       * Extract the actual text before sending it to React.
-       */
+      const response =
+        await sendConversationMessage(
+          conversationId,
+          content
+        );
 
-      const rawResult = response.result;
+      setMessages((current) => {
+        const withoutTemporary =
+          current.filter(
+            (message) =>
+              message.id !==
+              temporaryUserMessage.id
+          );
 
-      let result: string;
+        return [
+          ...withoutTemporary,
+          response.user_message,
+          response.assistant_message,
+        ];
+      });
 
-      if (typeof rawResult === "string") {
-        result = rawResult;
-      } else if (
-        rawResult &&
-        typeof rawResult === "object" &&
-        typeof rawResult.result === "string"
-      ) {
-        result = rawResult.result;
-      } else if (response.message) {
-        result = response.message;
-      } else if (response.agent) {
-        result = `Task routed to ${response.agent}.`;
-      } else {
-        result = "The task was received successfully.";
-      }
->>>>>>> 9d5924dc5829cb2becf5c30b7fb66266f792c74f
-
-      /*
-       * Step 2:
-       * Execute that workflow through the real
-       * OneAgent backend orchestrator.
-       */
-      const execution = await executeWorkflow(
-  workflow.workflow_id
-);
-
-if (execution.status === "failed") {
-  setError(
-    execution.message ||
-      "OneAgent could not complete this task."
-  );
-  return;
-}
-
-const statusResponse =
-  await getOrchestrationStatus(
-    workflow.workflow_id
-  );
-
-if (statusResponse.status === "failed") {
-  setError(
-    statusResponse.error ||
-      "OneAgent could not complete this task."
-  );
-  return;
-}
-
-if (statusResponse.result) {
-  setAnswer(statusResponse.result);
-} else {
-  setAnswer(
-    statusResponse.message ||
-      "The task was completed successfully."
-  );
-}
-
-setOrchestration({
-  status: statusResponse.status,
-  result: {
-    output: statusResponse.result,
-  },
-});
-
-      /*
-       * Refresh activity so the newly completed
-       * task immediately appears in the dashboard.
-       */
-      void loadRecentTasks();
+      setConversations((current) =>
+        current.map((conversation) =>
+          conversation.conversation_id ===
+          conversationId
+            ? {
+                ...conversation,
+                updated_at:
+                  response.assistant_message
+                    .created_at,
+              }
+            : conversation
+        )
+      );
     } catch (err) {
-      const message =
+      setMessages((current) =>
+        current.filter(
+          (message) =>
+            message.id !==
+            temporaryUserMessage.id
+        )
+      );
+
+      setError(
         err instanceof Error
           ? err.message
-          : "Something went wrong while processing your task.";
-
-      setError(message);
+          : "OneAgent could not complete this task."
+      );
     } finally {
       setLoading(false);
     }
@@ -316,531 +344,560 @@ setOrchestration({
     }
 
     setInput(prompt);
-    setError("");
   };
 
-  const startNewTask = () => {
-    if (loading) {
-      return;
-    }
-
-    setQuestion("");
-    setAnswer("");
-    setError("");
-    setInput("");
-    setWorkflowId(null);
-    setOrchestration(null);
-  };
+  const hasMessages = messages.length > 0;
 
   return (
-    <section className="mx-auto flex w-full max-w-5xl flex-col gap-8">
-      {/* Hero */}
-      {!question ? (
-        <div className="pt-10 text-center">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border border-border bg-card shadow-sm">
-            <Sparkles
-              size={21}
-              strokeWidth={1.8}
-              className="text-[#D97706]"
-            />
+    /*
+     * IMPORTANT:
+     *
+     * h-[calc(100dvh-64px)]
+     * = viewport height minus the main application header.
+     *
+     * overflow-hidden
+     * = the OUTER PAGE NEVER SCROLLS.
+     */
+    <div className="flex h-[calc(100dvh-64px)] w-full overflow-hidden bg-background">
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+
+        {/* ================================================= */}
+        {/* HEADER - FIXED                                    */}
+        {/* ================================================= */}
+
+        <header className="flex h-16 shrink-0 items-center border-b border-border bg-card/80 px-5 backdrop-blur">
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[15px] font-semibold text-primary">
+              {activeConversation?.title ||
+                "New Chat"}
+            </div>
+
+            <div className="text-[12px] text-faint">
+              OneAgent
+            </div>
           </div>
 
-          <h1 className="text-[34px] font-semibold tracking-[-0.025em] text-primary">
-            What can I help you accomplish?
-          </h1>
-
-          <p className="mx-auto mt-2 max-w-xl text-[16px] leading-7 text-muted">
-            Tell OneAgent what you need. It will analyze your task,
-            choose the right agent, and handle the work for you.
-          </p>
-        </div>
-      ) : (
-        <div className="pt-4">
           <button
             type="button"
-            onClick={startNewTask}
+            onClick={startNewChat}
             disabled={loading}
-            className="text-[13px] font-medium text-[#D97706] transition-colors hover:text-[#B45309] hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3.5 py-2 text-[13px] font-medium text-muted transition-colors hover:border-[#D97706]/40 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
           >
-            ← New task
+            <Plus size={15} />
+            New chat
           </button>
-        </div>
-      )}
+        </header>
 
-      {/* Main composer */}
-      <div className="mx-auto w-full max-w-4xl">
-        <div
-          className={`overflow-hidden rounded-2xl border bg-card shadow-sm transition-all ${
-            loading
-              ? "border-border"
-              : "border-border focus-within:border-[#D97706]/60 focus-within:shadow-[0_0_0_3px_rgba(217,119,6,0.06)]"
-          }`}
-        >
-          <textarea
-            value={input}
-            onChange={(event) =>
-              setInput(event.target.value)
-            }
-            onKeyDown={(event) => {
-              if (
-                event.key === "Enter" &&
-                !event.shiftKey
-              ) {
-                event.preventDefault();
-                void submitTask();
-              }
-            }}
-            disabled={loading}
-            rows={3}
-            placeholder="Ask OneAgent to research, write, code, analyze..."
-            aria-label="Task for OneAgent"
-            className="block w-full resize-none border-0 bg-transparent px-5 pt-5 text-[16px] leading-7 text-primary outline-none placeholder:text-faint disabled:cursor-not-allowed disabled:opacity-60"
-          />
+        {/* ================================================= */}
+        {/* MAIN BODY                                          */}
+        {/* ================================================= */}
 
-          <div className="flex items-center justify-between px-3 pb-3 pt-2">
-            <div className="pl-2 text-[13px] text-faint">
-              {loading
-                ? "OneAgent is working on your task..."
-                : "Enter to send · Shift + Enter for a new line"}
-            </div>
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
 
-            <button
-              type="button"
-              onClick={() => void submitTask()}
-              disabled={!input.trim() || loading}
-              aria-label={
-                loading
-                  ? "Processing task"
-                  : "Send task"
-              }
-              title={
-                loading
-                  ? "Processing task"
-                  : "Send task"
-              }
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-white transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-25"
-            >
-              {loading ? (
-                <Loader2
-                  size={18}
-                  className="animate-spin"
-                />
-              ) : (
-                <ArrowUp
-                  size={19}
-                  strokeWidth={2.2}
-                />
-              )}
-            </button>
-          </div>
-        </div>
-      </div>
+          {/* =============================================== */}
+          {/* CHAT AREA - THIS IS THE ONLY SCROLLABLE AREA     */}
+          {/* =============================================== */}
 
-      {/* Capabilities */}
-      {!question && (
-        <div className="mx-auto w-full max-w-4xl">
-          <div className="mb-3">
-            <div className="text-[14px] font-semibold text-primary">
-              What can OneAgent do?
-            </div>
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+            <div className="mx-auto flex min-h-full w-full max-w-5xl flex-col px-5 py-6 sm:px-8">
 
-            <div className="mt-0.5 text-[13px] text-faint">
-              Start with a capability or describe your own task.
-            </div>
-          </div>
+              {!hasMessages ? (
+                /* ========================================== */
+                /* EMPTY CHAT                                  */
+                /* ========================================== */
 
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-            {capabilities.map((capability) => {
-              const Icon = capability.icon;
+                <div className="flex flex-1 flex-col items-center justify-center py-6">
 
-              return (
-                <button
-                  key={capability.label}
-                  type="button"
-                  onClick={() =>
-                    selectCapability(
-                      capability.prompt
-                    )
-                  }
-                  disabled={loading}
-                  className="group min-h-[112px] rounded-xl border border-border bg-card p-4 text-left transition-all hover:-translate-y-0.5 hover:border-[#D97706]/40 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#FFF7ED]">
-                    <Icon
-                      size={17}
-                      strokeWidth={1.9}
+                  <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-2xl border border-border bg-card shadow-sm">
+                    <Sparkles
+                      size={22}
+                      strokeWidth={1.8}
                       className="text-[#D97706]"
                     />
                   </div>
 
-                  <div className="mt-3 text-[14px] font-semibold text-primary">
-                    {capability.label}
-                  </div>
+                  <h1 className="text-center text-[32px] font-semibold tracking-[-0.025em] text-primary">
+                    What can I help you accomplish?
+                  </h1>
 
-                  <div className="mt-1 text-[12px] leading-5 text-faint">
-                    {capability.description}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
+                  <p className="mt-3 max-w-2xl text-center text-[16px] leading-7 text-muted">
+                    Ask OneAgent anything. Each message is
+                    analyzed independently and routed to the
+                    best available agent and model.
+                  </p>
 
-      {/* Conversation / Result */}
-      {question && (
-        <div className="mx-auto flex w-full max-w-4xl flex-col gap-5">
-          {/* User task */}
-          <div className="flex justify-end">
-            <div className="max-w-[82%] rounded-2xl rounded-br-md bg-primary px-5 py-3.5 text-[15px] leading-6 text-white shadow-sm">
-              {question}
-            </div>
-          </div>
+                  <div className="mt-8 grid w-full max-w-4xl grid-cols-2 gap-4 sm:grid-cols-4">
+                    {capabilities
+                      .slice(0, 4)
+                      .map((capability) => {
+                        const Icon =
+                          capability.icon;
 
-          {/* OneAgent */}
-          <div className="flex gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-white shadow-sm">
-              <Sparkles size={17} />
-            </div>
+                        return (
+                          <button
+                            key={capability.label}
+                            type="button"
+                            onClick={() =>
+                              selectCapability(
+                                capability.prompt
+                              )
+                            }
+                            disabled={loading}
+                            className="rounded-xl border border-border bg-card p-4 text-left transition-all hover:-translate-y-0.5 hover:border-[#D97706]/40 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#FFF7ED]">
+                              <Icon
+                                size={18}
+                                className="text-[#D97706]"
+                              />
+                            </div>
 
-            <div className="min-w-0 flex-1 pt-0.5">
-              <div className="mb-2 flex items-center gap-2">
-                <span className="text-[14px] font-semibold text-primary">
-                  OneAgent
-                </span>
+                            <div className="mt-3 text-[14px] font-semibold text-primary">
+                              {capability.label}
+                            </div>
 
-                {loading && (
-                  <span className="rounded-full bg-[#FFF7ED] px-2.5 py-1 text-[11px] font-medium text-[#B45309]">
-                    Working
-                  </span>
-                )}
-
-                {!loading &&
-                  !error &&
-                  answer && (
-                    <span className="flex items-center gap-1 text-[11px] font-medium text-[#15803D]">
-                      <CheckCircle2 size={12} />
-                      Completed
-                    </span>
-                  )}
-              </div>
-
-              {loading ? (
-                <div
-                  className="rounded-xl border border-border bg-card px-5 py-5"
-                  role="status"
-                  aria-live="polite"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="flex gap-1">
-                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#D97706]" />
-
-                      <span
-                        className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#D97706]"
-                        style={{
-                          animationDelay: "100ms",
-                        }}
-                      />
-
-                      <span
-                        className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#D97706]"
-                        style={{
-                          animationDelay: "200ms",
-                        }}
-                      />
-                    </div>
-
-                    <span className="text-[14px] text-muted">
-                      Creating workflow and executing the best
-                      agent...
-                    </span>
+                            <div className="mt-1.5 text-[12px] leading-5 text-faint">
+                              {
+                                capability.description
+                              }
+                            </div>
+                          </button>
+                        );
+                      })}
                   </div>
                 </div>
-              ) : error ? (
+              ) : (
+                /* ========================================== */
+                /* CONVERSATION                                */
+                /* ========================================== */
+
+                <div className="space-y-8 pb-6">
+
+                  {messages.map((message) => (
+                    <MessageBubble
+                      key={message.id}
+                      message={message}
+                    />
+                  ))}
+
+                  {loading && (
+                    <div className="flex gap-3.5">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-white">
+                        <Sparkles size={17} />
+                      </div>
+
+                      <div className="rounded-2xl rounded-tl-md border border-border bg-card px-5 py-4">
+                        <div className="flex items-center gap-3">
+
+                          <div className="flex gap-1">
+                            <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#D97706]" />
+
+                            <span
+                              className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#D97706]"
+                              style={{
+                                animationDelay:
+                                  "100ms",
+                              }}
+                            />
+
+                            <span
+                              className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#D97706]"
+                              style={{
+                                animationDelay:
+                                  "200ms",
+                              }}
+                            />
+                          </div>
+
+                          <span className="text-[14px] text-muted">
+                            OneAgent is thinking...
+                          </span>
+
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div ref={messagesEndRef} />
+                </div>
+              )}
+
+              {error && (
                 <div
-                  className="rounded-xl border border-[#FECACA] bg-[#FEF2F2] px-5 py-4 text-[15px] leading-6 text-[#B91C1C]"
+                  className="mt-4 shrink-0 rounded-xl border border-[#FECACA] bg-[#FEF2F2] px-4 py-3 text-[14px] leading-6 text-[#B91C1C]"
                   role="alert"
                 >
                   {error}
-
-                  {workflowId && (
-                    <Link
-                      href={`/workflows/${workflowId}`}
-                      className="mt-3 block text-[13px] font-medium underline"
-                    >
-                      View workflow
-                    </Link>
-                  )}
                 </div>
-              ) : (
-<<<<<<< HEAD
-                <>
-                  <div className="rounded-xl border border-border bg-card px-5 py-5 text-[15px] leading-7 text-[#374151] shadow-sm whitespace-pre-wrap">
-                    {answer}
-                  </div>
-
-                  {orchestration && (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {orchestration.selected_agent?.name && (
-                        <MetadataBadge
-                          label="Agent"
-                          value={
-                            orchestration
-                              .selected_agent.name
-                          }
-                        />
-                      )}
-
-                      {orchestration.model?.selected && (
-                        <MetadataBadge
-                          label="Model"
-                          value={
-                            orchestration.model.selected
-                          }
-                        />
-                      )}
-
-                      {orchestration.search?.used && (
-                        <MetadataBadge
-                          label="Search"
-                          value={
-                            orchestration.search
-                              .provider ??
-                            "Enabled"
-                          }
-                        />
-                      )}
-
-                      {typeof orchestration
-                        .routing?.confidence ===
-                        "number" && (
-                        <MetadataBadge
-                          label="Confidence"
-                          value={`${Math.round(
-                            orchestration.routing
-                              .confidence * 100
-                          )}%`}
-                        />
-                      )}
-
-                      {orchestration.model
-                        ?.fallback_used && (
-                        <MetadataBadge
-                          label="Fallback"
-                          value="Used"
-                        />
-                      )}
-
-                      {workflowId && (
-                        <Link
-                          href={`/workflows/${workflowId}`}
-                          className="rounded-md border border-[#D97706]/30 bg-[#FFFBF5] px-3 py-1.5 text-[12px] font-medium text-[#B45309] hover:bg-[#FFF7ED]"
-                        >
-                          View workflow
-                        </Link>
-                      )}
-                    </div>
-                  )}
-                </>
-=======
-                <div className="rounded-xl border border-border bg-card px-4 py-4 text-[13.5px] leading-relaxed text-[#374151] whitespace-pre-wrap">
-                  {answer}
-                </div>
->>>>>>> 9d5924dc5829cb2becf5c30b7fb66266f792c74f
               )}
+
             </div>
           </div>
 
-          {!loading && (
-            <button
-              type="button"
-              onClick={startNewTask}
-              className="self-start rounded-lg border border-border bg-card px-3.5 py-2 text-[13px] font-medium text-muted transition-colors hover:border-[#D97706]/40 hover:bg-[#FFFBF5] hover:text-primary"
-            >
-              + Start a new task
-            </button>
-          )}
-        </div>
-      )}
+          {/* =============================================== */}
+          {/* COMPOSER - FIXED AT BOTTOM                       */}
+          {/* =============================================== */}
 
-      {/* Overview cards */}
-      {!question && (
-        <div className="mx-auto w-full max-w-4xl">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <OverviewCard
-              icon={<Zap size={17} />}
-              title="Smart routing"
-              description="Tasks are analyzed and routed to the most suitable agent."
-            />
+          <div className="shrink-0 bg-gradient-to-t from-background via-background to-transparent px-5 pb-4 pt-2 sm:px-8">
+            <div className="mx-auto w-full max-w-5xl">
 
-            <OverviewCard
-              icon={<Sparkles size={17} />}
-              title="Multi-model execution"
-              description="OneAgent can select and fall back between available AI models."
-            />
+              <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-all focus-within:border-[#D97706]/60 focus-within:shadow-[0_0_0_3px_rgba(217,119,6,0.06)]">
 
-            <OverviewCard
-              icon={<CheckCircle2 size={17} />}
-              title="Execution history"
-              description="Completed tasks and routing details are saved for later review."
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Recent activity */}
-      {!question && (
-        <div className="mx-auto w-full max-w-4xl pb-6">
-          <div className="mb-3 flex items-end justify-between">
-            <div>
-              <div className="text-[14px] font-semibold text-primary">
-                Recent activity
-              </div>
-
-              <div className="mt-0.5 text-[13px] text-faint">
-                Your latest OneAgent executions.
-              </div>
-            </div>
-
-            <Link
-              href="/history"
-              className="text-[13px] font-medium text-[#D97706] hover:underline"
-            >
-              View all
-            </Link>
-          </div>
-
-          <div className="overflow-hidden rounded-xl border border-border bg-card">
-            {activityLoading ? (
-              <div className="px-5 py-6 text-[13px] text-faint">
-                Loading recent activity...
-              </div>
-            ) : recentTasks.length === 0 ? (
-              <div className="px-5 py-8 text-center">
-                <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-lg bg-[#FFF7ED]">
-                  <Sparkles
-                    size={17}
-                    className="text-[#D97706]"
-                  />
-                </div>
-
-                <div className="mt-3 text-[14px] font-medium text-primary">
-                  No recent tasks
-                </div>
-
-                <div className="mt-1 text-[13px] text-faint">
-                  Run your first task above and it will appear here.
-                </div>
-              </div>
-            ) : (
-              recentTasks.map((task) => (
-                <ActivityItem
-                  key={task.id}
-                  title={task.task}
-                  detail={`${formatAgentName(
-                    task.agent
-                  )}${
-                    task.model
-                      ? ` · ${task.model}`
-                      : ""
-                  }`}
-                  time={formatActivityTime(
-                    task.created_at
-                  )}
-                  status={task.status}
+                <textarea
+                  value={input}
+                  onChange={(event) =>
+                    setInput(event.target.value)
+                  }
+                  onKeyDown={(event) => {
+                    if (
+                      event.key === "Enter" &&
+                      !event.shiftKey
+                    ) {
+                      event.preventDefault();
+                      void sendMessage();
+                    }
+                  }}
+                  disabled={loading}
+                  rows={2}
+                  placeholder="Message OneAgent..."
+                  aria-label="Message OneAgent"
+                  className="block max-h-32 min-h-[64px] w-full resize-none border-0 bg-transparent px-5 pt-4 text-[16px] leading-7 text-primary outline-none placeholder:text-faint disabled:opacity-60"
                 />
-              ))
-            )}
+
+                <div className="flex items-center justify-between px-4 pb-3 pt-1">
+
+                  <span className="pl-1 text-[12px] text-faint">
+                    Enter to send · Shift + Enter for a new line
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void sendMessage()
+                    }
+                    disabled={
+                      !input.trim() || loading
+                    }
+                    aria-label="Send message"
+                    className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-white transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-25"
+                  >
+                    {loading ? (
+                      <Loader2
+                        size={18}
+                        className="animate-spin"
+                      />
+                    ) : (
+                      <ArrowUp
+                        size={19}
+                        strokeWidth={2.2}
+                      />
+                    )}
+                  </button>
+
+                </div>
+              </div>
+
+              <div className="mt-1.5 text-center text-[11px] text-faint">
+                OneAgent can make mistakes. Verify important
+                information.
+              </div>
+
+            </div>
           </div>
+
         </div>
-      )}
-    </section>
-  );
-}
-
-function MetadataBadge({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <span className="rounded-md border border-border bg-card px-3 py-1.5 text-[12px] text-faint">
-      <span className="text-muted">{label}:</span>{" "}
-      <span className="font-medium text-primary">
-        {value}
-      </span>
-    </span>
-  );
-}
-
-function OverviewCard({
-  icon,
-  title,
-  description,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  description: string;
-}) {
-  return (
-    <div className="rounded-xl border border-border bg-card px-4 py-4">
-      <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#FFF7ED] text-[#D97706]">
-        {icon}
-      </div>
-
-      <div className="mt-3 text-[14px] font-semibold text-primary">
-        {title}
-      </div>
-
-      <div className="mt-1 text-[12px] leading-5 text-faint">
-        {description}
-      </div>
+      </main>
     </div>
   );
 }
 
-function ActivityItem({
-  title,
-  detail,
-  time,
-  status,
+
+/* ========================================================= */
+/* MESSAGE BUBBLE                                            */
+/* ========================================================= */
+
+function MessageBubble({
+  message,
 }: {
-  title: string;
-  detail: string;
-  time: string;
-  status: string;
+  message: ChatMessage;
 }) {
-  const failed = status === "failed";
+  const isUser = message.role === "user";
 
-  return (
-    <div className="flex items-center gap-3 border-b border-[#F0F0EE] px-5 py-4 last:border-b-0">
-      <span
-        className={`h-2.5 w-2.5 shrink-0 rounded-full ${
-          failed
-            ? "bg-[#DC2626]"
-            : "bg-[#16A34A]"
-        }`}
-        aria-hidden="true"
-      />
+  /* ------------------------------------------------------- */
+  /* USER MESSAGE                                            */
+  /* ------------------------------------------------------- */
 
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-[14px] font-medium text-primary">
-          {title}
-        </div>
-
-        <div className="mt-0.5 text-[12px] text-faint">
-          {detail}
+  if (isUser) {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[82%] rounded-2xl rounded-br-md bg-primary px-5 py-3.5 text-[15px] leading-7 text-white shadow-sm">
+          <div className="whitespace-pre-wrap">
+            {message.content}
+          </div>
         </div>
       </div>
+    );
+  }
 
-<<<<<<< HEAD
-      <div className="ml-3 shrink-0 text-[12px] text-faint">
-=======
-      <div className="ml-4 shrink-0 text-[10.5px] text-faint">
->>>>>>> 9d5924dc5829cb2becf5c30b7fb66266f792c74f
-        {time}
+  const model = formatModelName(message.model);
+  const agent = getAgentName(message.agent_id);
+  const tokens = formatTokens(message);
+
+  /* ------------------------------------------------------- */
+  /* ASSISTANT MESSAGE                                       */
+  /* ------------------------------------------------------- */
+
+  return (
+    <div className="flex gap-3.5">
+
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-white shadow-sm">
+        <Sparkles size={17} />
+      </div>
+
+      <div className="min-w-0 flex-1">
+
+        {/* Assistant header */}
+        <div className="mb-2 flex items-center gap-2">
+
+          <span className="text-[14px] font-semibold text-primary">
+            OneAgent
+          </span>
+
+          <span className="flex items-center gap-1 text-[11px] font-medium text-[#15803D]">
+            <CheckCircle2 size={12} />
+            Completed
+          </span>
+
+        </div>
+
+        {/* ================================================= */}
+        {/* MARKDOWN RESPONSE                                  */}
+        {/* ================================================= */}
+
+        <div className="rounded-2xl rounded-tl-md border border-border bg-card px-5 py-4 text-[15px] leading-7 text-[#374151] shadow-sm">
+
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+
+              /* ---------------- HEADINGS ---------------- */
+
+              h1: ({ children }) => (
+                <h1 className="mb-4 mt-1 text-[25px] font-bold leading-tight text-primary">
+                  {children}
+                </h1>
+              ),
+
+              h2: ({ children }) => (
+                <h2 className="mb-3 mt-6 text-[21px] font-bold leading-tight text-primary">
+                  {children}
+                </h2>
+              ),
+
+              h3: ({ children }) => (
+                <h3 className="mb-2 mt-5 text-[18px] font-semibold text-primary">
+                  {children}
+                </h3>
+              ),
+
+              /* ---------------- PARAGRAPHS ---------------- */
+
+              p: ({ children }) => (
+                <p className="mb-4 last:mb-0">
+                  {children}
+                </p>
+              ),
+
+              /* ---------------- LISTS ---------------- */
+
+              ul: ({ children }) => (
+                <ul className="mb-4 ml-6 list-disc space-y-1.5">
+                  {children}
+                </ul>
+              ),
+
+              ol: ({ children }) => (
+                <ol className="mb-4 ml-6 list-decimal space-y-1.5">
+                  {children}
+                </ol>
+              ),
+
+              li: ({ children }) => (
+                <li className="pl-1">
+                  {children}
+                </li>
+              ),
+
+              /* ---------------- TEXT ---------------- */
+
+              strong: ({ children }) => (
+                <strong className="font-bold text-primary">
+                  {children}
+                </strong>
+              ),
+
+              em: ({ children }) => (
+                <em className="italic">
+                  {children}
+                </em>
+              ),
+
+              /* ---------------- QUOTE ---------------- */
+
+              blockquote: ({ children }) => (
+                <blockquote className="my-4 border-l-4 border-[#D97706] bg-[#FFFBF5] px-4 py-3 italic text-muted">
+                  {children}
+                </blockquote>
+              ),
+
+              /* ---------------- CODE ---------------- */
+
+              code: ({
+                className,
+                children,
+              }) => {
+                const isCodeBlock =
+                  Boolean(className?.startsWith("language-")) ||
+                  String(children).includes("\n");
+
+                if (isCodeBlock) {
+                  return (
+                    <code
+                      className={`${className} block overflow-x-auto rounded-lg bg-[#111827] p-4 font-mono text-[13px] leading-6 text-white`}
+                    >
+                      {children}
+                    </code>
+                  );
+                }
+
+                return (
+                  <code className="rounded-md bg-[#F3F4F6] px-1.5 py-0.5 font-mono text-[13px] text-[#B45309]">
+                    {children}
+                  </code>
+                );
+              },
+
+              pre: ({ children }) => (
+                <pre className="my-4 overflow-x-auto rounded-lg">
+                  {children}
+                </pre>
+              ),
+
+              /* ---------------- LINKS ---------------- */
+
+              a: ({ children, href }) => (
+                <a
+                  href={href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium text-[#B45309] underline underline-offset-2 hover:text-[#92400E]"
+                >
+                  {children}
+                </a>
+              ),
+
+              /* ---------------- DIVIDER ---------------- */
+
+              hr: () => (
+                <hr className="my-5 border-border" />
+              ),
+
+              /* ================================================= */
+              /* TABLES                                             */
+              /* ================================================= */
+
+              table: ({ children }) => (
+                <div className="my-5 w-full overflow-x-auto rounded-xl border border-border">
+                  <table className="w-full min-w-[550px] border-collapse text-left text-[14px]">
+                    {children}
+                  </table>
+                </div>
+              ),
+
+              thead: ({ children }) => (
+                <thead className="bg-[#F9FAFB]">
+                  {children}
+                </thead>
+              ),
+
+              tbody: ({ children }) => (
+                <tbody className="divide-y divide-border">
+                  {children}
+                </tbody>
+              ),
+
+              tr: ({ children }) => (
+                <tr className="transition-colors hover:bg-[#FAFAFA]">
+                  {children}
+                </tr>
+              ),
+
+              th: ({ children }) => (
+                <th className="border-b border-border px-4 py-3 text-[13px] font-semibold text-primary">
+                  {children}
+                </th>
+              ),
+
+              td: ({ children }) => (
+                <td className="border-b border-border px-4 py-3 align-top text-[13px] leading-6 text-[#4B5563]">
+                  {children}
+                </td>
+              ),
+
+            }}
+          >
+            {message.content}
+          </ReactMarkdown>
+
+        </div>
+
+        {/* ================================================= */}
+        {/* MODEL / AGENT / TOKEN INFORMATION                 */}
+        {/* ================================================= */}
+
+        {(model || agent || tokens) && (
+          <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 px-1 text-[11px] text-faint">
+
+            {model && (
+              <span>
+                {model}
+              </span>
+            )}
+
+            {agent && (
+              <>
+                <span>·</span>
+                <span>
+                  {agent}
+                </span>
+              </>
+            )}
+
+            {tokens && (
+              <>
+                <span>·</span>
+                <span>
+                  {tokens}
+                </span>
+              </>
+            )}
+
+            {message.task_id && (
+              <>
+                <span>·</span>
+
+                <Link
+                  href="/history"
+                  className="hover:text-[#B45309] hover:underline"
+                >
+                  View task
+                </Link>
+              </>
+            )}
+
+          </div>
+        )}
+
       </div>
     </div>
   );

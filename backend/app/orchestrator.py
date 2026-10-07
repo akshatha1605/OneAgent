@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any, Dict
 
 from app.analyzer.task_analyzer import TaskAnalyzer
@@ -32,6 +33,7 @@ class Orchestrator:
     """
 
     ROUTING_CONFIDENCE_THRESHOLD = 0.50
+    AGENT_EXECUTION_TIMEOUT_SECONDS = 60
 
     MODEL_PREFERENCES = {
         "coding": ["groq", "gemini"],
@@ -174,6 +176,7 @@ class Orchestrator:
         self,
         task: str,
         context: Dict[str, Any] | None = None,
+        forced_agent_id: str | None = None,
     ) -> Dict[str, Any]:
 
         # -----------------------------------------------------
@@ -198,9 +201,40 @@ class Orchestrator:
         # STEP 2 — Select agent
         # -----------------------------------------------------
 
-        selected_agent_id, routing_method = self._select_agent(
-            analysis
-        )
+        if forced_agent_id:
+            forced_agent = next(
+                (
+                    agent
+                    for agent in get_all_agents()
+                    if agent["id"] == forced_agent_id
+                    and agent["status"] == "available"
+                ),
+                None,
+            )
+            if forced_agent is None:
+                return {
+                    "status": "failed",
+                    "task": task,
+                    "analysis": analysis_data,
+                    "selected_agent": None,
+                    "routing": {
+                        "method": "explicit",
+                        "confidence": analysis.confidence,
+                    },
+                    "result": {
+                        "status": "failed",
+                        "error": (
+                            f"Configured agent '{forced_agent_id}' "
+                            "is not available."
+                        ),
+                    },
+                }
+            selected_agent_id = forced_agent_id
+            routing_method = "explicit"
+        else:
+            selected_agent_id, routing_method = self._select_agent(
+                analysis
+            )
 
         # -----------------------------------------------------
         # No agent found
@@ -352,9 +386,12 @@ class Orchestrator:
                 # Execute agent
                 # ---------------------------------------------
 
-                result = await agent.execute(
-                    task=task,
-                    context=context,
+                result = await asyncio.wait_for(
+                    agent.execute(
+                        task=task,
+                        context=context,
+                    ),
+                    timeout=self.AGENT_EXECUTION_TIMEOUT_SECONDS,
                 )
 
                 # ---------------------------------------------

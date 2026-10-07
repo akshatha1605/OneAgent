@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 from typing import Any, Dict
 
@@ -36,19 +37,26 @@ class GroqAdapter(ModelAdapter):
     ) -> str:
 
         last_error = None
+        prompt_with_context = prompt
+        if context:
+            prompt_with_context += (
+                "\n\nContext from previous workflow steps:\n"
+                + json.dumps(context, ensure_ascii=False, default=str)
+            )
 
         for attempt in range(self.max_retries):
 
             try:
 
-                response = self.client.chat.completions.create(
+                response = await asyncio.to_thread(
+                    self.client.chat.completions.create,
                     model=self.model,
                     messages=[
                         {
                             "role": "user",
-                            "content": prompt
+                            "content": prompt_with_context
                         }
-                    ]
+                    ],
                 )
 
                 content = response.choices[0].message.content

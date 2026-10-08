@@ -496,6 +496,8 @@ export type TaskHistoryItem = {
   agent: string | null;
   model: string | null;
   confidence: number | null;
+  result: string | null;
+  error: string | null;
 };
 
 export type TasksResponse = {

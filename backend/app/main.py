@@ -1039,34 +1039,70 @@ async def get_tasks(
     db: Session = Depends(get_db),
 ):
     """
-    Return recently persisted OneAgent tasks.
+    Return recently persisted OneAgent tasks with their final answer.
     """
 
     tasks = get_recent_tasks(db)
 
-    return {
-        "tasks": [
+    task_list = []
+
+    for task in tasks:
+        result_text = None
+        error_text = None
+
+        if task.result:
+            error_text = task.result.error
+
+            if task.result.output:
+                try:
+                    parsed = json.loads(task.result.output)
+
+                    if isinstance(parsed, dict):
+                        result_text = (
+                            parsed.get("output")
+                            or parsed.get("result")
+                            or parsed.get("message")
+                            or parsed.get("answer")
+                        )
+
+                        if result_text is None:
+                            result_text = str(parsed)
+                    else:
+                        result_text = str(parsed)
+
+                except json.JSONDecodeError:
+                    result_text = task.result.output
+
+        task_list.append(
             {
                 "id": task.id,
                 "task": task.task_text,
                 "status": task.status,
                 "created_at": task.created_at.isoformat(),
+
                 "agent": (
                     task.execution.agent_id
                     if task.execution
                     else None
                 ),
+
                 "model": (
                     task.execution.model
                     if task.execution
                     else None
                 ),
+
                 "confidence": (
                     task.execution.routing_confidence
                     if task.execution
                     else None
                 ),
+
+                "result": result_text,
+                "error": error_text,
             }
-            for task in tasks
-        ]
+        )
+
+    return {
+        "tasks": task_list
     }

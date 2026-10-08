@@ -4,8 +4,8 @@ import Link from "next/link";
 import {
   CheckCircle2,
   XCircle,
-  ChevronRight,
   History,
+  ChevronRight,
 } from "lucide-react";
 
 export type HistoryOutcome = "success" | "failed";
@@ -22,6 +22,7 @@ export type HistoryEntry = {
   time: string;
   outcome: HistoryOutcome;
   group: HistoryGroup;
+  result: string;
 };
 
 type HistoryListProps = {
@@ -62,71 +63,72 @@ export default function HistoryList({
             </div>
 
             {/* Entries */}
-            <div className="overflow-hidden rounded-2xl border border-border bg-card">
-              {groupEntries.map((entry, index) => {
-                const isLast =
-                  index === groupEntries.length - 1;
-
+            <div className="flex flex-col gap-3">
+              {groupEntries.map((entry) => {
                 const isSuccess =
                   entry.outcome === "success";
 
                 return (
                   <Link
                     key={entry.id}
-                    href={`/workflows/${entry.id}`}
-                    className={`group flex items-center gap-4 px-5 py-4 transition-colors hover:bg-[#FFFBF5] focus:outline-none focus:ring-2 focus:ring-inset focus:ring-accent/20 ${
-                      !isLast
-                        ? "border-b border-[#F0F0EE]"
-                        : ""
-                    }`}
+                    href={`/history/${entry.id}`}
+                    className="group block rounded-2xl border border-border bg-card px-5 py-5 transition-all hover:border-[#D9D9D4] hover:bg-[#FCFCFA]"
                   >
-                    {/* Outcome icon */}
-                    <div
-                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
-                        isSuccess
-                          ? "bg-[#EAF7EE]"
-                          : "bg-[#FDECEC]"
-                      }`}
-                    >
-                      {isSuccess ? (
-                        <CheckCircle2
-                          size={17}
-                          className="text-[#16A34A]"
-                          aria-label="Successful workflow"
-                        />
-                      ) : (
-                        <XCircle
-                          size={17}
-                          className="text-[#DC2626]"
-                          aria-label="Failed workflow"
-                        />
-                      )}
-                    </div>
-
-                    {/* Details */}
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-[14px] font-medium text-primary">
-                        {entry.title}
+                    <div className="flex items-center gap-4">
+                      {/* Outcome icon */}
+                      <div
+                        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+                          isSuccess
+                            ? "bg-[#EAF7EE]"
+                            : "bg-[#FDECEC]"
+                        }`}
+                      >
+                        {isSuccess ? (
+                          <CheckCircle2
+                            size={17}
+                            className="text-[#16A34A]"
+                          />
+                        ) : (
+                          <XCircle
+                            size={17}
+                            className="text-[#DC2626]"
+                          />
+                        )}
                       </div>
 
-                      <div className="mt-1 truncate text-[12px] text-faint">
-                        {entry.agents.length > 0
-                          ? entry.agents.join(" · ")
-                          : "No agents"}
+                      {/* Task information */}
+                      <div className="min-w-0 flex-1">
+                        <h4 className="truncate text-[15px] font-semibold leading-6 text-primary">
+                          {entry.title}
+                        </h4>
+
+                        <div className="mt-1.5 flex flex-wrap gap-x-2 gap-y-1 text-[12px] text-faint">
+                          <span>
+                            {entry.agents.length > 0
+                              ? entry.agents.join(" · ")
+                              : "No agents"}
+                          </span>
+
+                          <span>·</span>
+
+                          <span>{entry.time}</span>
+
+                          <span>·</span>
+
+                          <span>
+                            {isSuccess
+                              ? "Completed"
+                              : "Failed"}
+                          </span>
+                        </div>
                       </div>
+
+                      {/* Arrow */}
+                      <ChevronRight
+                        size={19}
+                        className="shrink-0 text-faint transition-transform group-hover:translate-x-1 group-hover:text-primary"
+                      />
                     </div>
-
-                    {/* Time */}
-                    <span className="shrink-0 text-[12px] text-faint">
-                      {entry.time}
-                    </span>
-
-                    {/* Arrow */}
-                    <ChevronRight
-                      size={16}
-                      className="shrink-0 text-[#C4C4BE] transition-transform group-hover:translate-x-0.5 group-hover:text-primary"
-                      aria-hidden="true"
-                    />
                   </Link>
                 );
               })}
@@ -147,11 +149,11 @@ export default function HistoryList({
           </div>
 
           <p className="text-[15px] font-semibold text-primary">
-            No workflow history
+            No task history
           </p>
 
           <p className="mt-1.5 max-w-sm text-[12px] leading-5 text-faint">
-            Completed and failed workflows will appear
+            Completed and failed tasks will appear
             here after you start using OneAgent.
           </p>
         </div>

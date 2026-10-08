@@ -5,18 +5,14 @@ import { usePathname } from "next/navigation";
 import {
   LayoutGrid,
   Workflow,
-  Bot,
   History,
-  Settings,
   Sparkles,
 } from "lucide-react";
 
 const ICONS = {
   layout: LayoutGrid,
   workflow: Workflow,
-  bot: Bot,
   history: History,
-  settings: Settings,
 };
 
 const navItems = [
@@ -31,19 +27,9 @@ const navItems = [
     href: "/workflows",
   },
   {
-    label: "Agents",
-    icon: "bot",
-    href: "/agents",
-  },
-  {
     label: "History",
     icon: "history",
     href: "/history",
-  },
-  {
-    label: "Settings",
-    icon: "settings",
-    href: "/settings",
   },
 ] as const;
 

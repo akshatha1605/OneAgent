@@ -5,11 +5,8 @@
 OneAgent is an intelligent multi-agent orchestration platform that accepts tasks through a unified interface, analyzes user intent, and routes requests to specialized AI agents. Instead of requiring users to select an agent manually, OneAgent determines the appropriate capability for a task and coordinates its execution through a centralized orchestrator.
 
 The project aims to simplify interaction with multiple AI capabilities through a single, extensible interface.
-
 ---
-
 ## Table of Contents
-
 - [Overview](#overview)
 - [Problem Statement](#problem-statement)
 - [Objectives](#objectives)

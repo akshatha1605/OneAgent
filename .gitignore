@@ -58,6 +58,7 @@ htmlcov/
 # OneAgent - Root .gitignore
 # ============================================
 frontend/.next/
+.next/
 # -----------------------------
 # Environment / Secrets
 # -----------------------------

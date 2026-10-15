@@ -10,43 +10,101 @@ import HistoryList, {
 
 import { getTasks, TaskHistoryItem } from "@/lib/api";
 
+const TIME_ZONE = "Asia/Kolkata";
+
+function parseTimestamp(dateString: string): Date {
+  const value = dateString.trim();
+
+  // ISO timestamps with Z or an explicit offset already identify
+  // their timezone. Preserve that information.
+  const hasTimezone =
+    /(?:Z|[+-]\d{2}:\d{2})$/i.test(value);
+
+  // Backend timestamps without timezone information are assumed
+  // to be UTC. This matches the usual FastAPI UTC timestamp format.
+  const normalized = hasTimezone
+    ? value
+    : `${value}Z`;
+
+  return new Date(normalized);
+}
+
+function getDateKey(date: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
 function getHistoryGroup(
   dateString: string
 ): "Today" | "Yesterday" | "Earlier" {
-  const date = new Date(dateString);
+  const date = parseTimestamp(dateString);
+
+  if (Number.isNaN(date.getTime())) {
+    return "Earlier";
+  }
+
   const now = new Date();
 
-  const today = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate()
-  );
+  const taskDateKey = getDateKey(date);
+  const todayKey = getDateKey(now);
 
-  const yesterday = new Date(today);
-  yesterday.setDate(yesterday.getDate() - 1);
-
-  if (date >= today) {
+  if (taskDateKey === todayKey) {
     return "Today";
   }
 
-  if (date >= yesterday) {
+  // Calculate yesterday using the calendar in IST.
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+
+  const year = Number(
+    parts.find((part) => part.type === "year")?.value
+  );
+  const month = Number(
+    parts.find((part) => part.type === "month")?.value
+  );
+  const day = Number(
+    parts.find((part) => part.type === "day")?.value
+  );
+
+  // UTC calendar arithmetic avoids browser-local timezone errors.
+  const yesterdayDate = new Date(
+    Date.UTC(year, month - 1, day - 1)
+  );
+
+  const yesterdayKey = [
+    yesterdayDate.getUTCFullYear(),
+    String(yesterdayDate.getUTCMonth() + 1).padStart(2, "0"),
+    String(yesterdayDate.getUTCDate()).padStart(2, "0"),
+  ].join("-");
+
+  if (taskDateKey === yesterdayKey) {
     return "Yesterday";
   }
 
   return "Earlier";
 }
 
-function formatTime(dateString: string) {
-  const date = new Date(dateString);
+function formatTime(dateString: string): string {
+  const date = parseTimestamp(dateString);
 
   if (Number.isNaN(date.getTime())) {
     return "Unknown time";
   }
 
-  return date.toLocaleTimeString([], {
+  return new Intl.DateTimeFormat("en-IN", {
+    timeZone: TIME_ZONE,
     hour: "numeric",
     minute: "2-digit",
-  });
+    hour12: true,
+  }).format(date);
 }
 
 function mapTaskToHistoryEntry(
@@ -59,20 +117,12 @@ function mapTaskToHistoryEntry(
 
   return {
     id: task.id,
-
     title: task.task,
-
     agents: [agent],
-
     time: formatTime(task.created_at),
-
     outcome:
-      task.status === "failed"
-        ? "failed"
-        : "success",
-
+      task.status === "failed" ? "failed" : "success",
     group: getHistoryGroup(task.created_at),
-
     result:
       task.result ||
       task.error ||
@@ -83,6 +133,11 @@ function mapTaskToHistoryEntry(
 export default function HistoryPage() {
   const [tasks, setTasks] = useState<TaskHistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const {
+    weeklyAgentCalls,
+    weeklyWorkflows,
+  } = useUsage();
 
   useEffect(() => {
     async function loadHistory() {
@@ -95,11 +150,7 @@ export default function HistoryPage() {
 
         setTasks(response.tasks || []);
       } catch (error) {
-        console.error(
-          "Failed to load history:",
-          error
-        );
-
+        console.error("Failed to load history:", error);
         setTasks([]);
       } finally {
         setLoading(false);
@@ -108,31 +159,23 @@ export default function HistoryPage() {
 
     loadHistory();
   }, []);
-const {
-  weeklyAgentCalls,
-  weeklyWorkflows,
-} = useUsage();
+
   const entries = tasks.map(mapTaskToHistoryEntry);
 
   return (
     <div className="flex h-dvh w-full min-h-0 overflow-hidden bg-background">
-      {/* Sidebar */}
-<Sidebar
-  weeklyAgentCalls={weeklyAgentCalls}
-  weeklyWorkflows={weeklyWorkflows}
-/>
-      {/* Right side */}
+      <Sidebar
+        weeklyAgentCalls={weeklyAgentCalls}
+        weeklyWorkflows={weeklyWorkflows}
+      />
+
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        {/* Top bar */}
         <div className="shrink-0">
           <TopBar />
         </div>
 
-        {/* Scrollable content */}
         <main className="min-h-0 flex-1 overflow-y-auto px-6 py-7">
           <div className="mx-auto w-full max-w-5xl">
-
-            {/* Header */}
             <div className="mb-7">
               <h1 className="text-2xl font-semibold tracking-tight text-primary">
                 History
@@ -143,7 +186,6 @@ const {
               </p>
             </div>
 
-            {/* Loading */}
             {loading ? (
               <div className="flex min-h-[220px] items-center justify-center rounded-2xl border border-border bg-card">
                 <p className="text-sm text-faint">
@@ -153,7 +195,6 @@ const {
             ) : (
               <HistoryList entries={entries} />
             )}
-
           </div>
         </main>
       </div>

@@ -2,7 +2,11 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, CheckCircle2, AlertCircle } from "lucide-react";
+import {
+  ArrowLeft,
+  CheckCircle2,
+  AlertCircle,
+} from "lucide-react";
 
 import Sidebar from "@/components/Sidebar";
 import TopBar from "@/components/TopBar";
@@ -16,21 +20,58 @@ type HistoryDetailPageProps = {
   };
 };
 
+const TIME_ZONE = "Asia/Kolkata";
+
+/**
+ * Format a backend timestamp in Indian Standard Time.
+ * Timestamps with an explicit timezone retain that timezone information.
+ * Timestamps without a timezone are assumed to be UTC.
+ */
+function formatTimestamp(dateString: string): string {
+  if (!dateString) {
+    return "Unknown time";
+  }
+
+  const value = dateString.trim();
+
+  const hasTimezone =
+    /(?:Z|[+-]\d{2}:\d{2})$/i.test(value);
+
+  const date = new Date(
+    hasTimezone ? value : `${value}Z`
+  );
+
+  if (Number.isNaN(date.getTime())) {
+    return "Unknown time";
+  }
+
+  return new Intl.DateTimeFormat("en-IN", {
+    timeZone: TIME_ZONE,
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(date);
+}
+
 export default function HistoryDetailPage({
   params,
 }: HistoryDetailPageProps) {
-  const [task, setTask] = useState<TaskHistoryItem | null>(
-    null
-  );
+  const [task, setTask] =
+    useState<TaskHistoryItem | null>(null);
 
   const [loading, setLoading] = useState(true);
 
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] =
+    useState<string | null>(null);
 
   useEffect(() => {
     async function loadTask() {
       try {
         setLoading(true);
+        setError(null);
 
         const response = await getTasks();
 
@@ -45,7 +86,11 @@ export default function HistoryDetailPage({
 
         setTask(found);
       } catch (err) {
-        console.error(err);
+        console.error(
+          "Failed to load history item:",
+          err
+        );
+
         setError("Unable to load this result.");
       } finally {
         setLoading(false);
@@ -57,13 +102,17 @@ export default function HistoryDetailPage({
 
   return (
     <div className="flex h-dvh w-full min-h-0 overflow-hidden bg-background">
+      {/* Sidebar */}
       <Sidebar />
 
+      {/* Right side */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        {/* Top bar */}
         <div className="shrink-0">
           <TopBar />
         </div>
 
+        {/* Scrollable content */}
         <main className="min-h-0 flex-1 overflow-y-auto px-6 py-7">
           <div className="mx-auto w-full max-w-4xl">
             {/* Back */}
@@ -75,6 +124,7 @@ export default function HistoryDetailPage({
               Back to History
             </Link>
 
+            {/* Loading */}
             {loading && (
               <div className="rounded-2xl border border-border bg-card px-6 py-12 text-center">
                 <p className="text-sm text-muted-foreground">
@@ -83,6 +133,7 @@ export default function HistoryDetailPage({
               </div>
             )}
 
+            {/* Error */}
             {!loading && error && (
               <div className="rounded-2xl border border-destructive/30 bg-destructive/5 px-6 py-12 text-center">
                 <p className="text-sm text-destructive">
@@ -91,6 +142,7 @@ export default function HistoryDetailPage({
               </div>
             )}
 
+            {/* Task details */}
             {!loading && !error && task && (
               <article>
                 {/* Header */}
@@ -109,7 +161,8 @@ export default function HistoryDetailPage({
 
                       <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                         <span>
-                          {task.agent && task.agent !== "auto"
+                          {task.agent &&
+                          task.agent !== "auto"
                             ? task.agent
                             : "Auto"}
                         </span>
@@ -123,10 +176,11 @@ export default function HistoryDetailPage({
 
                         <span>•</span>
 
+                        {/* Corrected IST timestamp */}
                         <span>
-                          {new Date(
+                          {formatTimestamp(
                             task.created_at
-                          ).toLocaleString()}
+                          )}
                         </span>
                       </div>
                     </div>
@@ -143,7 +197,9 @@ export default function HistoryDetailPage({
 
                   <div className="px-6 py-6">
                     {task.result ? (
-                      <MarkdownRenderer content={task.result} />
+                      <MarkdownRenderer
+                        content={task.result}
+                      />
                     ) : task.error ? (
                       <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
                         {task.error}

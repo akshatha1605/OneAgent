@@ -58,6 +58,7 @@ htmlcov/
 # OneAgent - Root .gitignore
 # ============================================
 frontend/.next/
+.next/
 # -----------------------------
 # Environment / Secrets
 # -----------------------------
@@ -325,3 +326,15 @@ out/
 
 *.next
 frontend/.next/
+
+# Next.js generated files
+frontend/.next/
+frontend/node_modules/
+
+# Python environment and secrets
+backend/venv/
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example

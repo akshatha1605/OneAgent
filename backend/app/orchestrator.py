@@ -111,19 +111,16 @@ class Orchestrator:
     # ---------------------------------------------------------
     # MODEL SELECTION
     # ---------------------------------------------------------
-
     def _select_models(
         self,
         agent_id: str,
         complexity: str | None = None,
     ) -> list[str]:
         """
-        Select available model providers for the chosen agent.
+        Select providers using task-specific preferences.
 
-        Providers are ordered by task-specific preference.
-
-        OpenAI is intentionally used sparingly and only considered
-        as an additional fallback for complex tasks.
+        GPT is reserved for complex tasks and is used as
+        a fallback after the regular providers.
         """
 
         available = self.model_registry.list_available_providers()
@@ -139,12 +136,13 @@ class Orchestrator:
             if provider in available
         ]
 
-        # OpenAI is an optional fallback for complex tasks.
+        # Use GPT only for tasks classified as complex.
         if complexity == "complex" and "openai" in available:
             if "openai" not in selected:
                 selected.append("openai")
 
         return selected
+
 
     # ---------------------------------------------------------
     # SEARCH PROVIDER

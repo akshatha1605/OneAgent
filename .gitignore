@@ -317,4 +317,11 @@ temp/
 *.bak
 *.backup
 
-frontend.next/
+*.frontend.next/
+
+# Next.js build output
+.next/
+out/
+
+*.next
+frontend/.next/

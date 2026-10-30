@@ -1,7 +1,11 @@
 "use client";
 
+
+
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 
 type MarkdownRendererProps = {
   content: string;
@@ -12,7 +16,8 @@ export default function MarkdownRenderer({
 }: MarkdownRendererProps) {
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={[remarkGfm, remarkMath]}
+      rehypePlugins={[rehypeKatex]}
       components={{
         h1: ({ children }) => (
           <h1 className="mb-4 mt-1 text-[25px] font-bold leading-tight text-primary">

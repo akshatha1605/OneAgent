@@ -108,6 +108,7 @@ function getAgentName(agent?: string | null) {
 }
 
 export default function OneAgentWorkspace() {
+  const startedNewChat = useRef(false);
   const [conversations, setConversations] = useState<
     Conversation[]
   >([]);
@@ -145,11 +146,9 @@ export default function OneAgentWorkspace() {
   }, []);
 
   /*
-   * Load conversations silently.
-   *
-   * They are kept in the backend but are NOT displayed
-   * as a chat organizer/sidebar.
-   */
+ * Load conversations once when the workspace mounts.
+ * Select the latest conversation only during initial loading.
+ */
   useEffect(() => {
     const loadConversations = async () => {
       try {
@@ -158,23 +157,24 @@ export default function OneAgentWorkspace() {
         setConversations(response.conversations);
 
         if (
-          !activeConversationId &&
+          !startedNewChat.current &&
           response.conversations.length > 0
         ) {
-          setActiveConversationId(
-            response.conversations[0].conversation_id
-          );
-        }
-      } catch {
-        /*
-         * A fresh chat can still be created if
-         * conversation loading fails.
-         */
+          setActiveConversationId((current) => {
+          if (current) return current;
+
+          return response.conversations[0].conversation_id;
+        });
       }
-    };
+    } catch {
+      // A fresh chat can still be created.
+    }
+  };
 
     void loadConversations();
-  }, [activeConversationId]);
+  }, []);
+
+    
 
   /*
    * Load the active conversation.
@@ -214,15 +214,15 @@ export default function OneAgentWorkspace() {
    * Start a new conversation.
    */
   const startNewChat = () => {
-    if (loading) {
-      return;
-    }
+  if (loading) return;
 
-    setActiveConversationId(null);
-    setMessages([]);
-    setInput("");
-    setError("");
-  };
+  startedNewChat.current = true;
+
+  setActiveConversationId(null);
+  setMessages([]);
+  setInput("");
+  setError("");
+};
 
   /*
    * Create a conversation only when the first

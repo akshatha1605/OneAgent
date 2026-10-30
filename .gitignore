@@ -290,8 +290,11 @@ htmlcov/
 # ============================================================
 # AI / ML generated files
 # ============================================================
+# Ignore model artifacts, not Python source code
+**/models/
+!backend/app/models/
+!backend/app/models/**
 
-models/
 checkpoints/
 *.pt
 *.pth

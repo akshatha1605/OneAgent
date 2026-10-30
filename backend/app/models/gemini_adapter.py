@@ -1,36 +1,38 @@
+
 import asyncio
 import json
 import os
-from typing import Any, Dict
+from typing import Any
 
 from google import genai
 
 from app.models.model_adapter import ModelAdapter
+from app.models.reliability import (
+    is_retryable_provider_error,
+    provider_timeout_seconds,
+    retry_delay_seconds,
+)
+
 
 class GeminiAdapter(ModelAdapter):
-    def __init__(self):
-        self.api_key = os.getenv("GEMINI_API_KEY")
+    def __init__(self, api_key: str | None = None):
+        self.api_key = api_key or os.getenv("GEMINI_API_KEY")
 
         if not self.api_key:
-            raise RuntimeError(
-                "GEMINI_API_KEY is not configured."
-            )
+            raise RuntimeError("Gemini API key is not configured.")
 
-        self.client = genai.Client(
-            api_key=self.api_key
-        )
-
-        self.model = "gemini-3.8-flash"
+        self.client = genai.Client(api_key=self.api_key)
+        self.model = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
         self.max_retries = 3
 
     async def generate(
         self,
         prompt: str,
-        context: Dict[str, Any] | None = None,
+        context: dict[str, Any] | None = None,
     ) -> str:
-
         last_error = None
         prompt_with_context = prompt
+
         if context:
             prompt_with_context += (
                 "\n\nContext from previous workflow steps:\n"
@@ -39,47 +41,38 @@ class GeminiAdapter(ModelAdapter):
 
         for attempt in range(self.max_retries):
             try:
-                response = await asyncio.to_thread(
-                    self.client.models.generate_content,
-                    model=self.model,
-                    contents=prompt_with_context,
-                    config=genai.types.GenerateContentConfig(
-                        automatic_function_calling=(
-                            genai.types.AutomaticFunctionCallingConfig(
-                                disable=True
+                response = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        self.client.models.generate_content,
+                        model=self.model,
+                        contents=prompt_with_context,
+                        config=genai.types.GenerateContentConfig(
+                            automatic_function_calling=(
+                                genai.types.AutomaticFunctionCallingConfig(
+                                    disable=True
+                                )
                             )
-                        )
+                        ),
                     ),
+                    timeout=provider_timeout_seconds("gemini"),
                 )
 
                 if not response.text:
-                    raise RuntimeError(
-                        "Gemini returned an empty response."
-                    )
+                    raise RuntimeError("Gemini returned an empty response.")
 
                 return response.text
 
-            except Exception as e:
-                last_error = e
+            except Exception as exc:
+                last_error = exc
+                retryable = is_retryable_provider_error(exc)
 
-                error_text = str(e).upper()
-
-                is_retryable = (
-                    "503" in error_text
-                    or "UNAVAILABLE" in error_text
-                    or "429" in error_text
-                    or "RESOURCE_EXHAUSTED" in error_text
-                )
-
-                if not is_retryable:
+                if not retryable:
                     break
 
                 if attempt < self.max_retries - 1:
-                    wait_time = 2 ** attempt
-                    await asyncio.sleep(wait_time)
+                    await asyncio.sleep(retry_delay_seconds(attempt))
 
         raise RuntimeError(
-            f"Gemini request failed after "
-            f"{self.max_retries} attempts: "
+            f"Gemini request failed after {self.max_retries} attempts: "
             f"{type(last_error).__name__}: {last_error}"
         ) from last_error

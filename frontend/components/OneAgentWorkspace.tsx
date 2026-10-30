@@ -25,6 +25,8 @@ import {
   type ChatMessage,
   type Conversation,
   type ConversationDetailResponse,
+  type ResearchSource,
+  ApiError,
 } from "@/lib/api";
 
 type Capability = {
@@ -116,8 +118,10 @@ export default function OneAgentWorkspace() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   const [input, setInput] = useState("");
+  const [selectedAgent, setSelectedAgent] = useState("auto");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [retryContent, setRetryContent] = useState<string | null>(null);
 
   const messagesEndRef =
     useRef<HTMLDivElement | null>(null);
@@ -252,8 +256,8 @@ export default function OneAgentWorkspace() {
   /*
    * Send message to backend/orchestrator.
    */
-  const sendMessage = async () => {
-    const content = input.trim();
+  const sendMessage = async (contentOverride?: string) => {
+    const content = (contentOverride ?? input).trim();
 
     if (!content || loading) {
       return;
@@ -261,6 +265,7 @@ export default function OneAgentWorkspace() {
 
     setInput("");
     setError("");
+    setRetryContent(null);
     setLoading(true);
 
     const temporaryUserMessage: ChatMessage = {
@@ -288,7 +293,8 @@ export default function OneAgentWorkspace() {
       const response =
         await sendConversationMessage(
           conversationId,
-          content
+          content,
+          selectedAgent
         );
 
       setMessages((current) => {
@@ -333,6 +339,12 @@ export default function OneAgentWorkspace() {
           ? err.message
           : "OneAgent could not complete this task."
       );
+      if (
+        err instanceof ApiError &&
+        (err.status === 429 || err.status >= 500)
+      ) {
+        setRetryContent(content);
+      }
     } finally {
       setLoading(false);
     }
@@ -527,7 +539,17 @@ export default function OneAgentWorkspace() {
                   className="mt-4 shrink-0 rounded-xl border border-[#FECACA] bg-[#FEF2F2] px-4 py-3 text-[14px] leading-6 text-[#B91C1C]"
                   role="alert"
                 >
-                  {error}
+                  <div>{error}</div>
+                  {retryContent && (
+                    <button
+                      type="button"
+                      onClick={() => void sendMessage(retryContent)}
+                      disabled={loading}
+                      className="mt-2 rounded-lg border border-[#B91C1C]/30 px-3 py-1.5 text-[12px] font-medium hover:bg-[#FEE2E2] disabled:opacity-50"
+                    >
+                      Retry
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -566,9 +588,30 @@ export default function OneAgentWorkspace() {
 
                 <div className="flex items-center justify-between px-4 pb-3 pt-1">
 
-                  <span className="pl-1 text-[12px] text-faint">
-                    Enter to send · Shift + Enter for a new line
-                  </span>
+                  <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-2 text-[12px] text-faint">
+                      <span>Agent</span>
+                      <select
+                        value={selectedAgent}
+                        onChange={(event) =>
+                          setSelectedAgent(event.target.value)
+                        }
+                        disabled={loading}
+                        aria-label="Select agent"
+                        className="rounded-lg border border-border bg-background px-2 py-1 text-[12px] text-primary outline-none focus:border-[#D97706]/60"
+                      >
+                        <option value="auto">Auto</option>
+                        <option value="research">Research</option>
+                        <option value="coding">Coding</option>
+                        <option value="writing">Writing</option>
+                        <option value="document">Documents</option>
+                      </select>
+                    </label>
+
+                    <span className="hidden text-[12px] text-faint sm:inline">
+                      Enter to send · Shift + Enter for a new line
+                    </span>
+                  </div>
 
                   <button
                     type="button"
@@ -642,6 +685,14 @@ function MessageBubble({
   const model = formatModelName(message.model);
   const agent = getAgentName(message.agent_id);
   const tokens = formatTokens(message);
+  const metadata = message.metadata;
+  const search = metadata?.search;
+  const sources: ResearchSource[] =
+    search?.sources ??
+    (metadata?.result?.metadata as {
+      sources?: ResearchSource[];
+    } | undefined)?.sources ??
+    [];
 
   /* ------------------------------------------------------- */
   /* ASSISTANT MESSAGE                                       */
@@ -663,12 +714,58 @@ function MessageBubble({
             OneAgent
           </span>
 
-          <span className="flex items-center gap-1 text-[11px] font-medium text-[#15803D]">
-            <CheckCircle2 size={12} />
-            Completed
-          </span>
+          {metadata?.status === "failed" ||
+          metadata?.result?.status === "failed" ? (
+            <span className="text-[11px] font-medium text-[#B91C1C]">
+              Failed
+            </span>
+          ) : (
+            <span className="flex items-center gap-1 text-[11px] font-medium text-[#15803D]">
+              <CheckCircle2 size={12} />
+              Completed
+            </span>
+          )}
 
         </div>
+
+        {search && (
+          <div className="mt-3 rounded-xl border border-border bg-background px-4 py-3">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px]">
+              <span className="font-semibold text-primary">
+                Web search
+              </span>
+              <span className="text-muted">
+                {search.status === "completed"
+                  ? `${search.results_count ?? sources.length} sources used`
+                  : search.status === "missing_key"
+                    ? "Tavily key not configured"
+                    : search.status === "no_results"
+                      ? "No sources found"
+                      : search.status === "timeout"
+                        ? "Search timed out"
+                        : search.status === "failed"
+                          ? "Search failed"
+                          : "Not requested"}
+              </span>
+            </div>
+
+            {sources.length > 0 && (
+              <div className="mt-2 flex flex-col gap-1">
+                {sources.map((source, index) => (
+                  <a
+                    key={`${source.url}-${index}`}
+                    href={source.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="truncate text-[12px] font-medium text-[#B45309] underline underline-offset-2 hover:text-[#92400E]"
+                  >
+                    [{index + 1}] {source.title || source.url}
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ================================================= */}
         {/* MARKDOWN RESPONSE                                  */}

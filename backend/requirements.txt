@@ -9,3 +9,8 @@ python-multipart==0.0.9
 python-dotenv
 SQLAlchemy
 openai
+httpx
+cryptography
+tavily-python
+psycopg[binary]==3.2.3
+alembic==1.14.1

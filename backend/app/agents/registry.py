@@ -125,6 +125,7 @@ def get_agent_implementation(
     agent_id: str,
     model: ModelAdapter,
     search: SearchAdapter | None = None,
+    search_status: str = "not_requested",
 ):
     """
     Create an executable agent with its required dependencies.
@@ -139,6 +140,7 @@ def get_agent_implementation(
         return agent_class(
             model=model,
             search=search,
+            search_status=search_status,
         )
 
     return agent_class(

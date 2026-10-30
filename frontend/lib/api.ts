@@ -1,3 +1,6 @@
+
+import { createClient } from "@/lib/supabase/client";
+
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -9,15 +12,18 @@ type ApiErrorResponse = {
   detail?: string;
   message?: string;
   error?: string;
+  request_id?: string;
 };
 
 export class ApiError extends Error {
   status: number;
+  requestId?: string;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, requestId?: string) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.requestId = requestId;
   }
 }
 
@@ -29,16 +35,44 @@ async function request<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
+  const supabase = createClient();
+
+  // Read the current Supabase session before making the API request.
+  const {
+    data: { session },
+    error: sessionError,
+  } = await supabase.auth.getSession();
+
+  if (sessionError) {
+    throw new ApiError(
+      `Unable to retrieve authentication session: ${sessionError.message}`,
+      401
+    );
+  }
+
+  // Preserve caller-supplied headers.
+  const headers = new Headers(options.headers);
+
+  if (!headers.has("Content-Type") && options.body !== undefined) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  // Attach the Supabase access token whenever a session exists.
+  if (session?.access_token) {
+    headers.set(
+      "Authorization",
+      `Bearer ${session.access_token}`
+    );
+  }
+
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options.headers,
-    },
+    headers,
   });
 
   if (!response.ok) {
     let message = `Request failed with status ${response.status}`;
+    let requestId: string | undefined;
 
     try {
       const data = (await response.json()) as ApiErrorResponse;
@@ -48,11 +82,12 @@ async function request<T>(
         data.message ??
         data.error ??
         message;
+      requestId = data.request_id;
     } catch {
-      // Keep default error message.
+      // Keep the default error message.
     }
 
-    throw new ApiError(message, response.status);
+    throw new ApiError(message, response.status, requestId);
   }
 
   if (response.status === 204) {
@@ -290,15 +325,12 @@ export function createConversation(title = "New Chat") {
   });
 }
 
-/**
- * Return all conversations for the chat sidebar.
- */
 export function getConversations() {
   return request<ConversationsResponse>("/api/conversations");
 }
 
 /* -------------------------------------------------------------------------- */
-/* Conversation Messages                                                     */
+/* Conversation Messages                                                      */
 /* -------------------------------------------------------------------------- */
 
 export type ChatMessageRole = "user" | "assistant";
@@ -313,6 +345,7 @@ export type ChatMessage = {
   output_tokens?: number | null;
   total_tokens?: number | null;
   task_id?: string | null;
+  metadata?: OrchestrationResponse | null;
   created_at: string;
 };
 
@@ -332,21 +365,20 @@ export function getConversation(conversationId: string) {
 
 export type SendMessageRequest = {
   content: string;
+  agent_id?: string;
 };
 
 export type SendMessageResponse = {
   conversation_id: string;
-
   user_message: ChatMessage;
-
   assistant_message: ChatMessage;
-
   orchestration: OrchestrationResponse;
 };
 
 export function sendConversationMessage(
   conversationId: string,
-  content: string
+  content: string,
+  agentId?: string
 ) {
   return request<SendMessageResponse>(
     `/api/conversations/${encodeURIComponent(conversationId)}/messages`,
@@ -354,6 +386,9 @@ export function sendConversationMessage(
       method: "POST",
       body: JSON.stringify({
         content,
+        ...(agentId && agentId !== "auto"
+          ? { agent_id: agentId }
+          : {}),
       } satisfies SendMessageRequest),
     }
   );
@@ -365,6 +400,7 @@ export function sendConversationMessage(
 
 export type OrchestrationRequest = {
   task: string;
+  agent_id?: string;
 };
 
 export type OrchestrationAnalysis = {
@@ -390,7 +426,20 @@ export type OrchestrationModel = {
 
 export type OrchestrationSearch = {
   provider?: string | null;
+  query?: string;
+  status?: string;
   used?: boolean;
+  results_count?: number;
+  sources?: ResearchSource[];
+  error?: string | null;
+};
+
+export type ResearchSource = {
+  title: string;
+  url: string;
+  content?: string;
+  score?: number;
+  published_date?: string | null;
 };
 
 export type OrchestrationResult = {
@@ -410,21 +459,16 @@ export type OrchestrationResult = {
 };
 
 export type OrchestrationResponse = {
+  execution_id?: string;
+  request_id?: string;
   status: string;
   task?: string;
-
   analysis?: OrchestrationAnalysis;
-
   routing?: OrchestrationRouting;
-
   selected_agent?: SelectedAgent | null;
-
   model?: OrchestrationModel;
-
   search?: OrchestrationSearch;
-
   result?: OrchestrationResult;
-
   usage?: {
     input_tokens?: number;
     output_tokens?: number;
@@ -432,16 +476,18 @@ export type OrchestrationResponse = {
     prompt_tokens?: number;
     completion_tokens?: number;
   };
-
   error?: string;
   message?: string;
 };
 
-export function orchestrateTask(task: string) {
+export function orchestrateTask(task: string, agentId?: string) {
   return request<OrchestrationResponse>("/api/orchestrate", {
     method: "POST",
     body: JSON.stringify({
       task,
+      ...(agentId && agentId !== "auto"
+        ? { agent_id: agentId }
+        : {}),
     } satisfies OrchestrationRequest),
   });
 }
@@ -512,17 +558,6 @@ export function getTasks() {
 /* Authentication                                                             */
 /* -------------------------------------------------------------------------- */
 
-export type RegisterRequest = {
-  name: string;
-  email: string;
-  password: string;
-};
-
-export type LoginRequest = {
-  email: string;
-  password: string;
-};
-
 export type AuthUser = {
   id?: string;
   name?: string;
@@ -530,34 +565,29 @@ export type AuthUser = {
   plan?: string;
 };
 
-export type RegisterResponse = {
-  message: string;
-  user: {
-    name: string;
-    email: string;
-  };
-};
-
-export type LoginResponse = {
-  message: string;
-  access_token: string;
-  token_type: string;
-};
-
 export type CurrentUserResponse = AuthUser;
 
-export function registerUser(data: RegisterRequest) {
-  return request<RegisterResponse>("/api/auth/register", {
-    method: "POST",
-    body: JSON.stringify(data),
-  });
+/**
+ * The frontend uses Supabase Auth directly for registration and login.
+ * These functions intentionally do not call the retired backend endpoints.
+ */
+export async function registerUser(_data: {
+  name: string;
+  email: string;
+  password: string;
+}): Promise<never> {
+  throw new Error(
+    "Use Supabase Auth from the frontend to register a new account."
+  );
 }
 
-export function loginUser(data: LoginRequest) {
-  return request<LoginResponse>("/api/auth/login", {
-    method: "POST",
-    body: JSON.stringify(data),
-  });
+export async function loginUser(_data: {
+  email: string;
+  password: string;
+}): Promise<never> {
+  throw new Error(
+    "Use Supabase Auth from the frontend to sign in."
+  );
 }
 
 export function getCurrentUser() {
@@ -588,13 +618,17 @@ export function getProfile() {
   return request<UserProfile>("/api/users/profile");
 }
 
-export function updateProfile(data: {
+/**
+ * Profile changes must be made through Supabase Auth.
+ * The backend profile PUT endpoint is intentionally not used.
+ */
+export async function updateProfile(_data: {
   name: string;
   email: string;
   plan?: string;
-}) {
-  return request<UpdateProfileResponse>("/api/users/profile", {
-    method: "PUT",
-    body: JSON.stringify(data),
-  });
+}): Promise<UpdateProfileResponse> {
+  throw new ApiError(
+    "Profile updates must be performed through Supabase Auth.",
+    501
+  );
 }

@@ -1,96 +1,72 @@
-import asyncio
-import json
-import os
-from typing import Any, Dict
 
-from dotenv import load_dotenv
-from openai import OpenAI
+import os
+import asyncio
+from typing import Any
+
+from openai import AsyncOpenAI
 
 from app.models.model_adapter import ModelAdapter
+from app.models.reliability import (
+    is_retryable_provider_error,
+    provider_timeout_seconds,
+    retry_delay_seconds,
+)
 
-load_dotenv()
 
-
-class GrokAdapter(ModelAdapter):
-    def __init__(self):
-        self.api_key = os.getenv("XAI_API_KEY")
+class GroqAdapter(ModelAdapter):
+    def __init__(self, api_key: str | None = None):
+        self.api_key = api_key or os.getenv("GROQ_API_KEY")
 
         if not self.api_key:
-            raise RuntimeError("XAI_API_KEY is not configured.")
+            raise ValueError("Groq API key is not configured.")
 
-        self.client = OpenAI(
+        self.client = AsyncOpenAI(
             api_key=self.api_key,
-            base_url="https://api.x.ai/v1",
-            timeout=120.0,
-            max_retries=0,
+            base_url="https://api.groq.com/openai/v1",
         )
-
-        self.model = os.getenv("XAI_MODEL", "grok-4.7")
-        self.max_retries = 3
+        self.model = os.getenv(
+            "GROQ_MODEL",
+            "llama-3.3-70b-versatile",
+        )
 
     async def generate(
         self,
         prompt: str,
-        context: Dict[str, Any] | None = None,
+        context: dict[str, Any] | None = None,
     ) -> str:
-        prompt_with_context = prompt
+        messages = []
 
         if context:
-            prompt_with_context += (
-                "\n\nContext from previous workflow steps:\n"
-                + json.dumps(
-                    context,
-                    ensure_ascii=False,
-                    default=str,
-                )
-            )
+            messages.append({
+                "role": "system",
+                "content": f"Context:\n{context}",
+            })
+
+        messages.append({
+            "role": "user",
+            "content": prompt,
+        })
 
         last_error = None
-
-        for attempt in range(self.max_retries):
+        for attempt in range(3):
             try:
-                response = await asyncio.to_thread(
-                    self.client.chat.completions.create,
-                    model=self.model,
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": prompt_with_context,
-                        }
-                    ],
+                response = await asyncio.wait_for(
+                    self.client.chat.completions.create(
+                        model=self.model,
+                        messages=messages,
+                    ),
+                    timeout=provider_timeout_seconds("groq"),
                 )
-
                 content = response.choices[0].message.content
-
-                if not content or not content.strip():
-                    raise RuntimeError("Grok returned an empty response.")
-
+                if not content:
+                    raise RuntimeError("Groq returned an empty response.")
                 return content
-
             except Exception as exc:
                 last_error = exc
-                error_text = str(exc).upper()
-
-                retryable = any(
-                    marker in error_text
-                    for marker in (
-                        "429",
-                        "RATE LIMIT",
-                        "500",
-                        "502",
-                        "503",
-                        "504",
-                        "TIMEOUT",
-                        "UNAVAILABLE",
-                    )
-                )
-
-                if not retryable or attempt == self.max_retries - 1:
+                if not is_retryable_provider_error(exc) or attempt == 2:
                     break
-
-                await asyncio.sleep(2 ** attempt)
+                await asyncio.sleep(retry_delay_seconds(attempt))
 
         raise RuntimeError(
-            f"Grok request failed: "
-            f"{type(last_error).__name__}: {last_error}"
+            f"Groq request failed: {type(last_error).__name__}."
         ) from last_error

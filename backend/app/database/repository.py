@@ -1,9 +1,8 @@
+
 import json
 from datetime import datetime
 from typing import Any
 
-# Keep the repository importable when SQLAlchemy is not installed in the
-# type-checking environment; Session is used only for annotations here.
 Session = Any
 
 from app.database.models import (
@@ -24,10 +23,11 @@ from app.database.models import (
 
 def create_conversation(
     db: Session,
+    user_id: str,
     title: str = "New Chat",
 ) -> Conversation:
-
     conversation = Conversation(
+        user_id=user_id,
         title=title,
     )
 
@@ -40,10 +40,12 @@ def create_conversation(
 
 def get_conversations(
     db: Session,
+    user_id: str,
     limit: int = 50,
 ):
     return (
         db.query(Conversation)
+        .filter(Conversation.user_id == user_id)
         .order_by(Conversation.updated_at.desc())
         .limit(limit)
         .all()
@@ -53,10 +55,14 @@ def get_conversations(
 def get_conversation(
     db: Session,
     conversation_id: str,
+    user_id: str,
 ):
     return (
         db.query(Conversation)
-        .filter(Conversation.id == conversation_id)
+        .filter(
+            Conversation.id == conversation_id,
+            Conversation.user_id == user_id,
+        )
         .first()
     )
 
@@ -92,8 +98,8 @@ def create_message(
     output_tokens: int | None = None,
     total_tokens: int | None = None,
     task_id: str | None = None,
+    orchestration_metadata: dict[str, Any] | None = None,
 ) -> Message:
-
     message = Message(
         conversation_id=conversation_id,
         role=role,
@@ -104,6 +110,11 @@ def create_message(
         output_tokens=output_tokens,
         total_tokens=total_tokens,
         task_id=task_id,
+        orchestration_metadata=(
+            json.dumps(orchestration_metadata)
+            if orchestration_metadata is not None
+            else None
+        ),
     )
 
     db.add(message)
@@ -127,10 +138,18 @@ def create_message(
 def get_conversation_messages(
     db: Session,
     conversation_id: str,
+    user_id: str,
 ):
     return (
         db.query(Message)
-        .filter(Message.conversation_id == conversation_id)
+        .join(
+            Conversation,
+            Message.conversation_id == Conversation.id,
+        )
+        .filter(
+            Message.conversation_id == conversation_id,
+            Conversation.user_id == user_id,
+        )
         .order_by(Message.created_at.asc())
         .all()
     )
@@ -145,9 +164,10 @@ def save_orchestration(
     db: Session,
     task_text: str,
     response: dict,
+    user_id: str,
 ) -> Task:
-
     task = Task(
+        user_id=user_id,
         task_text=task_text,
         status=response.get("status", "failed"),
     )
@@ -179,7 +199,12 @@ def save_orchestration(
             "status",
             response.get("status", "failed"),
         ),
-        output=json.dumps(result_data),
+        output=json.dumps(
+            {
+                **result_data,
+                "execution_id": response.get("execution_id"),
+            }
+        ),
         error=result_data.get("error"),
     )
 
@@ -194,10 +219,12 @@ def save_orchestration(
 
 def get_recent_tasks(
     db: Session,
+    user_id: str,
     limit: int = 20,
 ):
     return (
         db.query(Task)
+        .filter(Task.user_id == user_id)
         .order_by(Task.created_at.desc())
         .limit(limit)
         .all()
@@ -212,9 +239,10 @@ def get_recent_tasks(
 def create_workflow(
     db: Session,
     task: str,
+    user_id: str,
 ) -> Workflow:
-
     workflow = Workflow(
+        user_id=user_id,
         task=task,
         status="queued",
     )
@@ -228,10 +256,12 @@ def create_workflow(
 
 def get_workflows(
     db: Session,
+    user_id: str,
     limit: int = 50,
 ):
     return (
         db.query(Workflow)
+        .filter(Workflow.user_id == user_id)
         .order_by(Workflow.created_at.desc())
         .limit(limit)
         .all()
@@ -241,10 +271,14 @@ def get_workflows(
 def get_workflow(
     db: Session,
     workflow_id: str,
+    user_id: str,
 ):
     return (
         db.query(Workflow)
-        .filter(Workflow.id == workflow_id)
+        .filter(
+            Workflow.id == workflow_id,
+            Workflow.user_id == user_id,
+        )
         .first()
     )
 
@@ -256,7 +290,6 @@ def add_workflow_step(
     step_order: int,
     agent_id: str | None = None,
 ) -> WorkflowStep:
-
     step = WorkflowStep(
         workflow_id=workflow.id,
         name=name,

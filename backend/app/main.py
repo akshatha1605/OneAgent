@@ -1,6 +1,10 @@
-import json
-from importlib import import_module
 
+import json
+import logging
+import os
+import time
+import uuid
+from importlib import import_module
 
 try:
     load_dotenv = import_module("dotenv").load_dotenv
@@ -8,15 +12,19 @@ except ImportError:
     def load_dotenv(*args, **kwargs):
         return False
 
-
-from fastapi import Depends, FastAPI, HTTPException  # pyright: ignore[reportMissingImports]
-from fastapi.middleware.cors import CORSMiddleware  # pyright: ignore[reportMissingImports]
-from pydantic import BaseModel  # pyright: ignore[reportMissingImports]
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import inspect, text
-from sqlalchemy.orm import Session # pyright: ignore[reportMissingImports]
+from sqlalchemy.orm import Session
 
+from app.auth import get_current_user
 from app.agents.registry import get_all_agents, get_agent
-from app.database.database import Base, engine, get_db
+from app.database.database import Base, SessionLocal, engine, get_db, is_sqlite
+from app.database import models as db_models
+from app.database.migrations import migrate_user_ownership
 from app.database.repository import (
     add_workflow_step,
     create_conversation,
@@ -32,6 +40,11 @@ from app.database.repository import (
     update_workflow_status,
 )
 from app.orchestrator import Orchestrator
+from app.settings_routes import router as settings_router
+from app.rate_limit import enforce_ip_rate_limit, enforce_user_rate_limit
+
+
+logger = logging.getLogger("oneagent.api")
 
 
 # ============================================================
@@ -51,13 +64,19 @@ app = FastAPI(
     description="Intelligent Multi-Agent AI Orchestration Platform",
 )
 
-Base.metadata.create_all(bind=engine)
+# SQLite remains self-initializing for local development and tests. Production
+# PostgreSQL schema changes are applied explicitly with Alembic.
+if is_sqlite:
+    Base.metadata.create_all(bind=engine)
+    migrate_user_ownership()
 
 
 def _ensure_workflow_step_agent_column() -> None:
-    """Add the optional agent column to existing development databases."""
-
     inspector = inspect(engine)
+
+    if "workflow_steps" not in inspector.get_table_names():
+        return
+
     columns = {
         column["name"]
         for column in inspector.get_columns("workflow_steps")
@@ -73,7 +92,8 @@ def _ensure_workflow_step_agent_column() -> None:
             )
 
 
-_ensure_workflow_step_agent_column()
+if is_sqlite:
+    _ensure_workflow_step_agent_column()
 
 
 # ============================================================
@@ -83,63 +103,136 @@ _ensure_workflow_step_agent_column()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
+        origin.strip()
+        for origin in os.getenv(
+            "CORS_ALLOWED_ORIGINS",
+            "http://localhost:3000,http://127.0.0.1:3000",
+        ).split(",")
+        if origin.strip()
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# Register API-key settings endpoints.
+app.include_router(settings_router)
+
+
+@app.middleware("http")
+async def request_observability(request: Request, call_next):
+    request_id = str(uuid.uuid4())
+    request.state.request_id = request_id
+    started = time.perf_counter()
+    response = None
+
+    limited_path = (
+        request.url.path == "/api/orchestrate"
+        or request.url.path.endswith("/messages")
+        or request.url.path.endswith("/execute")
+        or request.url.path.startswith("/api/settings/api-keys")
+    )
+
+    if limited_path:
+        db = SessionLocal()
+        try:
+            retry_after = enforce_ip_rate_limit(db=db, request=request)
+        finally:
+            db.close()
+
+        if retry_after is not None:
+            response = JSONResponse(
+                status_code=429,
+                content={
+                    "detail": "Rate limit exceeded. Please retry shortly.",
+                    "request_id": request_id,
+                },
+                headers={"Retry-After": str(retry_after)},
+            )
+        else:
+            response = await call_next(request)
+    else:
+        response = await call_next(request)
+
+    duration_ms = round((time.perf_counter() - started) * 1000, 2)
+    response.headers["X-Request-ID"] = request_id
+    logger.info(
+        "request_complete request_id=%s method=%s path=%s status=%s duration_ms=%s",
+        request_id,
+        request.method,
+        request.url.path,
+        response.status_code,
+        duration_ms,
+    )
+    return response
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+    headers = dict(exc.headers or {})
+    headers["X-Request-ID"] = request_id
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail, "request_id": request_id},
+        headers=headers,
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(
+    request: Request,
+    exc: RequestValidationError,
+):
+    request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": exc.errors(),
+            "request_id": request_id,
+        },
+        headers={"X-Request-ID": request_id},
+    )
+
 
 # ============================================================
 # REQUEST MODELS
 # ============================================================
 
-
-class UserRegister(BaseModel):
-    name: str
-    email: str
-    password: str
-
-
-class UserLogin(BaseModel):
-    email: str
-    password: str
-
-
 class UserProfile(BaseModel):
-    name: str
-    email: str
-    plan: str = "Free"
+    name: str = Field(min_length=1, max_length=200)
+    email: str = Field(min_length=3, max_length=320)
+    plan: str = Field(default="Free", max_length=50)
 
 
 class TaskRequest(BaseModel):
-    task: str
+    task: str = Field(min_length=1, max_length=20_000)
+    agent_id: str | None = Field(default=None, max_length=50)
 
 
 class WorkflowCreate(BaseModel):
-    task: str
+    task: str = Field(min_length=1, max_length=20_000)
 
 
 class WorkflowStepCreate(BaseModel):
-    name: str
-    step_order: int | None = None
-    agent_id: str | None = None
+    name: str = Field(min_length=1, max_length=20_000)
+    step_order: int | None = Field(default=None, ge=1)
+    agent_id: str | None = Field(default=None, max_length=50)
 
 
 class WorkflowStepUpdate(BaseModel):
-    name: str | None = None
-    step_order: int | None = None
-    agent_id: str | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=20_000)
+    step_order: int | None = Field(default=None, ge=1)
+    agent_id: str | None = Field(default=None, max_length=50)
 
 
 class ConversationCreate(BaseModel):
-    title: str = "New Chat"
+    title: str = Field(default="New Chat", min_length=1, max_length=200)
 
 
 class ConversationMessageCreate(BaseModel):
-    content: str
+    content: str = Field(min_length=1, max_length=20_000)
+    agent_id: str | None = Field(default=None, max_length=50)
 
 
 def _serialize_workflow_step(step):
@@ -168,10 +261,71 @@ def _serialize_workflow_step(step):
     }
 
 
+ALLOWED_CHAT_AGENTS = {
+    "research",
+    "coding",
+    "writing",
+    "document",
+}
+
+
+def _normalize_chat_agent(agent_id: str | None) -> str | None:
+    if agent_id is None or agent_id.strip().lower() in {"", "auto"}:
+        return None
+
+    normalized = agent_id.strip().lower()
+    if normalized not in ALLOWED_CHAT_AGENTS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Invalid agent_id. Expected one of: "
+                "auto, research, coding, writing, document."
+            ),
+        )
+
+    return normalized
+
+
+def _decode_message_metadata(message) -> dict | None:
+    if not message.orchestration_metadata:
+        return None
+
+    try:
+        value = json.loads(message.orchestration_metadata)
+    except json.JSONDecodeError:
+        return None
+
+    return value if isinstance(value, dict) else None
+
+
+def _log_execution(
+    request: Request,
+    response: dict,
+    duration_ms: float,
+) -> None:
+    selected_agent = response.get("selected_agent") or {}
+    model = response.get("model") or {}
+    search = response.get("search") or {}
+    logger.info(
+        "execution_complete request_id=%s execution_id=%s status=%s "
+        "agent=%s model=%s search_status=%s failure_category=%s "
+        "duration_ms=%s",
+        getattr(request.state, "request_id", "unknown"),
+        response.get("execution_id"),
+        response.get("status"),
+        selected_agent.get("id"),
+        model.get("selected"),
+        search.get("status"),
+        "orchestration_failed"
+        if response.get("status") != "completed"
+        else None,
+        duration_ms,
+    )
+
+
 # ============================================================
 # SYSTEM
 # ============================================================
-
 
 @app.get("/", tags=["System"])
 async def root():
@@ -190,37 +344,72 @@ async def health():
     }
 
 
+@app.get("/api/health/live", tags=["System"])
+async def liveness():
+    return {"status": "alive", "service": "OneAgent API"}
+
+
+@app.get("/api/health/ready", tags=["System"])
+async def readiness():
+    checks = {
+        "database": False,
+        "authentication": bool(
+            os.getenv("SUPABASE_URL")
+            and os.getenv("SUPABASE_ANON_KEY")
+        ),
+        "encryption": bool(os.getenv("API_KEY_ENCRYPTION_KEY")),
+    }
+
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        checks["database"] = True
+    except Exception:
+        logger.exception("readiness_database_check_failed")
+
+    ready = all(checks.values())
+    return JSONResponse(
+        status_code=200 if ready else 503,
+        content={
+            "status": "ready" if ready else "not_ready",
+            "service": "OneAgent API",
+            "checks": checks,
+        },
+    )
+
+
 # ============================================================
 # AUTHENTICATION
 # ============================================================
 
-
 @app.post("/api/auth/register", tags=["Authentication"])
-async def register(user: UserRegister):
-    return {
-        "message": "User registered successfully",
-        "user": {
-            "name": user.name,
-            "email": user.email,
-        },
-    }
+async def register():
+    raise HTTPException(
+        status_code=410,
+        detail="Use Supabase Auth from the frontend to register.",
+    )
 
 
 @app.post("/api/auth/login", tags=["Authentication"])
-async def login(user: UserLogin):
-    return {
-        "message": "Login successful",
-        "access_token": "demo-token",
-        "token_type": "bearer",
-    }
+async def login():
+    raise HTTPException(
+        status_code=410,
+        detail="Use Supabase Auth from the frontend to sign in.",
+    )
 
 
 @app.get("/api/auth/me", tags=["Authentication"])
-async def current_user():
+async def current_user(user: dict = Depends(get_current_user)):
+    metadata = user.get("user_metadata") or {}
+
     return {
-        "id": "user_001",
-        "name": "Demo User",
-        "email": "user@oneagent.ai",
+        "id": user["id"],
+        "name": (
+            metadata.get("full_name")
+            or metadata.get("name")
+            or user.get("email", "").split("@")[0]
+        ),
+        "email": user.get("email"),
         "plan": "Free",
     }
 
@@ -229,47 +418,51 @@ async def current_user():
 # USERS
 # ============================================================
 
-
 @app.get("/api/users/profile", tags=["Users"])
-async def get_profile():
+async def get_profile(user: dict = Depends(get_current_user)):
+    metadata = user.get("user_metadata") or {}
+
     return {
-        "id": "user_001",
-        "name": "Demo User",
-        "email": "user@oneagent.ai",
+        "id": user["id"],
+        "name": (
+            metadata.get("full_name")
+            or metadata.get("name")
+            or (user.get("email") or "").split("@")[0]
+        ),
+        "email": user.get("email"),
         "plan": "Free",
     }
 
 
 @app.put("/api/users/profile", tags=["Users"])
-async def update_profile(profile: UserProfile):
-    return {
-        "message": "Profile updated successfully",
-        "profile": profile,
-    }
+async def update_profile(
+    profile: UserProfile,
+    user: dict = Depends(get_current_user),
+):
+    raise HTTPException(
+        status_code=501,
+        detail=(
+            "Profile updates must be implemented through "
+            "the Supabase Auth user-update flow."
+        ),
+    )
 
 
 # ============================================================
 # AGENTS
 # ============================================================
 
-
 @app.get("/api/agents", tags=["Agents"])
-async def get_agents():
-    return {
-        "agents": get_all_agents(),
-    }
+async def get_agents_endpoint():
+    return {"agents": get_all_agents()}
 
 
 @app.get("/api/agents/{agent_id}", tags=["Agents"])
 async def get_agent_details(agent_id: str):
-
     agent = get_agent(agent_id)
 
     if not agent:
-        raise HTTPException(
-            status_code=404,
-            detail="Agent not found",
-        )
+        raise HTTPException(status_code=404, detail="Agent not found")
 
     return agent
 
@@ -278,24 +471,18 @@ async def get_agent_details(agent_id: str):
 # CONVERSATIONS
 # ============================================================
 
-
-@app.post(
-    "/api/conversations",
-    tags=["Conversations"],
-)
+@app.post("/api/conversations", tags=["Conversations"])
 async def create_conversation_endpoint(
     request: ConversationCreate,
     db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
 ):
-    """
-    Create a new persistent conversation.
-    """
-
     title = request.title.strip() or "New Chat"
 
     conversation = create_conversation(
         db=db,
         title=title,
+        user_id=user["id"],
     )
 
     return {
@@ -306,18 +493,12 @@ async def create_conversation_endpoint(
     }
 
 
-@app.get(
-    "/api/conversations",
-    tags=["Conversations"],
-)
+@app.get("/api/conversations", tags=["Conversations"])
 async def get_conversations_endpoint(
     db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
 ):
-    """
-    Return conversations for the sidebar.
-    """
-
-    conversations = get_conversations(db)
+    conversations = get_conversations(db, user_id=user["id"])
 
     return {
         "conversations": [
@@ -332,32 +513,25 @@ async def get_conversations_endpoint(
     }
 
 
-@app.get(
-    "/api/conversations/{conversation_id}",
-    tags=["Conversations"],
-)
+@app.get("/api/conversations/{conversation_id}", tags=["Conversations"])
 async def get_conversation_endpoint(
     conversation_id: str,
     db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
 ):
-    """
-    Return one conversation with all messages.
-    """
-
     conversation = get_conversation(
         db=db,
         conversation_id=conversation_id,
+        user_id=user["id"],
     )
 
     if not conversation:
-        raise HTTPException(
-            status_code=404,
-            detail="Conversation not found",
-        )
+        raise HTTPException(status_code=404, detail="Conversation not found")
 
     messages = get_conversation_messages(
         db=db,
         conversation_id=conversation_id,
+        user_id=user["id"],
     )
 
     return {
@@ -376,6 +550,7 @@ async def get_conversation_endpoint(
                 "output_tokens": message.output_tokens,
                 "total_tokens": message.total_tokens,
                 "task_id": message.task_id,
+                "metadata": _decode_message_metadata(message),
                 "created_at": message.created_at.isoformat(),
             }
             for message in messages
@@ -386,46 +561,30 @@ async def get_conversation_endpoint(
 @app.post(
     "/api/conversations/{conversation_id}/messages",
     tags=["Conversations"],
+    dependencies=[Depends(enforce_user_rate_limit("message"))],
 )
 async def send_conversation_message(
     conversation_id: str,
     request: ConversationMessageCreate,
+    http_request: Request,
     db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
 ):
-    """
-    Send one message through the OneAgent orchestrator.
-
-    Each message gets its own:
-    - Task
-    - Execution
-    - Result
-    - Agent
-    - Model
-    - Token metadata
-    """
-
     conversation = get_conversation(
         db=db,
         conversation_id=conversation_id,
+        user_id=user["id"],
     )
 
     if not conversation:
-        raise HTTPException(
-            status_code=404,
-            detail="Conversation not found",
-        )
+        raise HTTPException(status_code=404, detail="Conversation not found")
 
     content = request.content.strip()
 
     if not content:
-        raise HTTPException(
-            status_code=400,
-            detail="Message cannot be empty",
-        )
+        raise HTTPException(status_code=400, detail="Message cannot be empty")
 
-    # --------------------------------------------------------
-    # Save USER message
-    # --------------------------------------------------------
+    forced_agent_id = _normalize_chat_agent(request.agent_id)
 
     user_message = create_message(
         db=db,
@@ -435,27 +594,25 @@ async def send_conversation_message(
     )
 
     try:
-        # ----------------------------------------------------
-        # Run OneAgent
-        # ----------------------------------------------------
-
+        execution_started = time.perf_counter()
         response = await orchestrator.process(
             task=content,
+            forced_agent_id=forced_agent_id,
+            user_id=user["id"],
+            db=db,
         )
-
-        # ----------------------------------------------------
-        # Persist task / execution / result
-        # ----------------------------------------------------
+        _log_execution(
+            http_request,
+            response,
+            round((time.perf_counter() - execution_started) * 1000, 2),
+        )
 
         saved_task = save_orchestration(
             db=db,
             task_text=content,
             response=response,
+            user_id=user["id"],
         )
-
-        # ----------------------------------------------------
-        # Extract AI metadata
-        # ----------------------------------------------------
 
         selected_agent = response.get("selected_agent") or {}
         model_data = response.get("model") or {}
@@ -464,32 +621,24 @@ async def send_conversation_message(
         model = model_data.get("selected")
         agent_id = selected_agent.get("id")
 
-        # Token usage is provider-dependent.
-        usage = (
-            response.get("usage")
-            or result_data.get("usage")
-            or {}
-        )
+        usage = response.get("usage") or result_data.get("usage") or {}
 
         input_tokens = usage.get(
             "input_tokens",
             usage.get("prompt_tokens"),
         )
-
         output_tokens = usage.get(
             "output_tokens",
             usage.get("completion_tokens"),
         )
-
         total_tokens = usage.get("total_tokens")
 
-        if total_tokens is None:
-            if input_tokens is not None and output_tokens is not None:
-                total_tokens = input_tokens + output_tokens
-
-        # ----------------------------------------------------
-        # Extract actual assistant output
-        # ----------------------------------------------------
+        if (
+            total_tokens is None
+            and input_tokens is not None
+            and output_tokens is not None
+        ):
+            total_tokens = input_tokens + output_tokens
 
         assistant_content = (
             result_data.get("output")
@@ -502,10 +651,6 @@ async def send_conversation_message(
         if not assistant_content:
             assistant_content = str(result_data)
 
-        # ----------------------------------------------------
-        # Save ASSISTANT message
-        # ----------------------------------------------------
-
         assistant_message = create_message(
             db=db,
             conversation_id=conversation_id,
@@ -517,6 +662,7 @@ async def send_conversation_message(
             output_tokens=output_tokens,
             total_tokens=total_tokens,
             task_id=saved_task.id,
+            orchestration_metadata=response,
         )
 
         return {
@@ -537,6 +683,7 @@ async def send_conversation_message(
                 "output_tokens": assistant_message.output_tokens,
                 "total_tokens": assistant_message.total_tokens,
                 "task_id": assistant_message.task_id,
+                "metadata": response,
                 "created_at": assistant_message.created_at.isoformat(),
             },
             "orchestration": response,
@@ -544,11 +691,10 @@ async def send_conversation_message(
 
     except HTTPException:
         raise
-    except Exception as exc:
-
+    except Exception:
         raise HTTPException(
             status_code=500,
-            detail=str(exc),
+            detail="Could not process the conversation message.",
         )
 
 
@@ -556,25 +702,19 @@ async def send_conversation_message(
 # WORKFLOWS
 # ============================================================
 
-
 @app.post("/api/workflows", tags=["Workflows"])
 async def create_workflow_endpoint(
     workflow_data: WorkflowCreate,
     db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
 ):
-    """
-    Create and persist a real workflow.
-    """
-
     if not workflow_data.task.strip():
-        raise HTTPException(
-            status_code=400,
-            detail="Task cannot be empty",
-        )
+        raise HTTPException(status_code=400, detail="Task cannot be empty")
 
     workflow = create_workflow(
         db=db,
         task=workflow_data.task.strip(),
+        user_id=user["id"],
     )
 
     return {
@@ -589,12 +729,9 @@ async def create_workflow_endpoint(
 @app.get("/api/workflows", tags=["Workflows"])
 async def get_workflows_endpoint(
     db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
 ):
-    """
-    Return persisted workflows.
-    """
-
-    workflows = get_workflows(db)
+    workflows = get_workflows(db, user_id=user["id"])
 
     return {
         "workflows": [
@@ -611,28 +748,20 @@ async def get_workflows_endpoint(
     }
 
 
-@app.get(
-    "/api/workflows/{workflow_id}",
-    tags=["Workflows"],
-)
+@app.get("/api/workflows/{workflow_id}", tags=["Workflows"])
 async def get_workflow_endpoint(
     workflow_id: str,
     db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
 ):
-    """
-    Return a persisted workflow and its steps.
-    """
-
     workflow = get_workflow(
         db=db,
         workflow_id=workflow_id,
+        user_id=user["id"],
     )
 
     if not workflow:
-        raise HTTPException(
-            status_code=404,
-            detail="Workflow not found",
-        )
+        raise HTTPException(status_code=404, detail="Workflow not found")
 
     return {
         "workflow_id": workflow.id,
@@ -644,32 +773,39 @@ async def get_workflow_endpoint(
     }
 
 
-@app.post(
-    "/api/workflows/{workflow_id}/steps",
-    tags=["Workflows"],
-)
+@app.post("/api/workflows/{workflow_id}/steps", tags=["Workflows"])
 async def add_workflow_step_endpoint(
     workflow_id: str,
     step_data: WorkflowStepCreate,
     db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
 ):
-    """Add one ordered instruction to a persisted workflow."""
-
-    workflow = get_workflow(db=db, workflow_id=workflow_id)
+    workflow = get_workflow(
+        db=db,
+        workflow_id=workflow_id,
+        user_id=user["id"],
+    )
 
     if not workflow:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
     name = step_data.name.strip()
+
     if not name:
-        raise HTTPException(status_code=400, detail="Step instruction cannot be empty")
+        raise HTTPException(
+            status_code=400,
+            detail="Step instruction cannot be empty",
+        )
 
     configured_agent_id = step_data.agent_id
+
     if configured_agent_id == "auto":
         configured_agent_id = None
+
     if configured_agent_id is not None:
         configured_agent_id = configured_agent_id.strip().lower()
         agent = get_agent(configured_agent_id)
+
         if not agent or agent["status"] != "available":
             raise HTTPException(
                 status_code=400,
@@ -680,6 +816,7 @@ async def add_workflow_step_endpoint(
             )
 
     step_order = step_data.step_order
+
     if step_order is None:
         step_order = max(
             (step.step_order for step in workflow.steps),
@@ -714,17 +851,25 @@ async def update_workflow_step_endpoint(
     step_id: int,
     step_data: WorkflowStepUpdate,
     db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
 ):
-    workflow = get_workflow(db=db, workflow_id=workflow_id)
+    workflow = get_workflow(
+        db=db,
+        workflow_id=workflow_id,
+        user_id=user["id"],
+    )
+
     if not workflow:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
     step = next((item for item in workflow.steps if item.id == step_id), None)
+
     if not step:
         raise HTTPException(status_code=404, detail="Workflow step not found")
 
     if step_data.name is not None:
         step.name = step_data.name.strip()
+
         if not step.name:
             raise HTTPException(
                 status_code=400,
@@ -733,11 +878,13 @@ async def update_workflow_step_endpoint(
 
     if "agent_id" in step_data.model_fields_set:
         configured_agent_id = step_data.agent_id
+
         if configured_agent_id is None or configured_agent_id == "auto":
             configured_agent_id = None
         else:
             configured_agent_id = configured_agent_id.strip().lower()
             agent = get_agent(configured_agent_id)
+
             if not agent or agent["status"] != "available":
                 raise HTTPException(
                     status_code=400,
@@ -746,6 +893,7 @@ async def update_workflow_step_endpoint(
                         "auto, research, coding, writing, document."
                     ),
                 )
+
         step.agent_id = configured_agent_id
 
     if step_data.step_order is not None:
@@ -754,22 +902,23 @@ async def update_workflow_step_endpoint(
                 status_code=400,
                 detail="Step order must be at least 1",
             )
+
         if any(
-            item.id != step.id
-            and item.step_order == step_data.step_order
+            item.id != step.id and item.step_order == step_data.step_order
             for item in workflow.steps
         ):
             raise HTTPException(
                 status_code=409,
                 detail="Step order already exists",
             )
+
         step.step_order = step_data.step_order
 
-    # Editing invalidates the current execution snapshot, while preserving
-    # the historical Task/Execution/Result rows.
     step.status = "queued"
     step.task_id = None
+
     update_workflow_status(db=db, workflow=workflow, status="queued")
+
     return _serialize_workflow_step(step)
 
 
@@ -781,21 +930,28 @@ async def delete_workflow_step_endpoint(
     workflow_id: str,
     step_id: int,
     db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
 ):
-    workflow = get_workflow(db=db, workflow_id=workflow_id)
+    workflow = get_workflow(
+        db=db,
+        workflow_id=workflow_id,
+        user_id=user["id"],
+    )
+
     if not workflow:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
     step = next((item for item in workflow.steps if item.id == step_id), None)
+
     if not step:
         raise HTTPException(status_code=404, detail="Workflow step not found")
 
-    remaining_steps = [
-        item for item in workflow.steps if item.id != step.id
-    ]
+    remaining_steps = [item for item in workflow.steps if item.id != step.id]
+
     workflow.steps.remove(step)
     db.delete(step)
     db.flush()
+
     for index, remaining_step in enumerate(
         sorted(remaining_steps, key=lambda item: item.step_order),
         start=1,
@@ -805,6 +961,7 @@ async def delete_workflow_step_endpoint(
         remaining_step.task_id = None
 
     update_workflow_status(db=db, workflow=workflow, status="queued")
+
     return {
         "workflow_id": workflow.id,
         "deleted_step_id": step_id,
@@ -815,31 +972,24 @@ async def delete_workflow_step_endpoint(
 @app.post(
     "/api/workflows/{workflow_id}/execute",
     tags=["Workflows"],
+    dependencies=[Depends(enforce_user_rate_limit("workflow"))],
 )
 async def execute_workflow(
     workflow_id: str,
+    http_request: Request,
     db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
 ):
-    """
-    Execute the workflow through the real OneAgent orchestrator.
-    """
-
     workflow = get_workflow(
         db=db,
         workflow_id=workflow_id,
+        user_id=user["id"],
     )
 
     if not workflow:
-        raise HTTPException(
-            status_code=404,
-            detail="Workflow not found",
-        )
+        raise HTTPException(status_code=404, detail="Workflow not found")
 
-    update_workflow_status(
-        db=db,
-        workflow=workflow,
-        status="running",
-    )
+    update_workflow_status(db=db, workflow=workflow, status="running")
 
     try:
         if not workflow.steps:
@@ -849,11 +999,10 @@ async def execute_workflow(
                 detail="Workflow must contain at least one step before execution",
             )
 
-        # A rerun starts a fresh current execution while historical task
-        # records remain available in the database.
         for step in workflow.steps:
             step.status = "queued"
             step.task_id = None
+
         db.commit()
 
         previous_result = None
@@ -869,27 +1018,42 @@ async def execute_workflow(
                 if previous_result is not None
                 else None
             )
+
             process_kwargs = {
                 "task": step.name,
                 "context": context,
+                "user_id": user["id"],
+                "db": db,
             }
+
             if step.agent_id:
                 process_kwargs["forced_agent_id"] = step.agent_id
 
+            execution_started = time.perf_counter()
             response = await orchestrator.process(**process_kwargs)
+            _log_execution(
+                http_request,
+                response,
+                round((time.perf_counter() - execution_started) * 1000, 2),
+            )
+
             saved_task = save_orchestration(
                 db=db,
                 task_text=step.name,
                 response=response,
+                user_id=user["id"],
             )
+
             step.task_id = saved_task.id
             final_response = response
 
             if response.get("status") != "completed":
                 step.status = "failed"
+
                 for dependent_step in workflow.steps:
                     if dependent_step.step_order > step.step_order:
                         dependent_step.status = "blocked"
+
                 db.commit()
                 break
 
@@ -919,17 +1083,12 @@ async def execute_workflow(
 
     except HTTPException:
         raise
-    except Exception as exc:
-
-        update_workflow_status(
-            db=db,
-            workflow=workflow,
-            status="failed",
-        )
+    except Exception:
+        update_workflow_status(db=db, workflow=workflow, status="failed")
 
         raise HTTPException(
             status_code=500,
-            detail=str(exc),
+            detail="Workflow execution failed.",
         )
 
 
@@ -937,31 +1096,38 @@ async def execute_workflow(
 # ORCHESTRATION
 # ============================================================
 
-
 orchestrator = Orchestrator()
 
 
 @app.post(
     "/api/orchestrate",
     tags=["Orchestration"],
+    dependencies=[Depends(enforce_user_rate_limit("orchestrate"))],
 )
 async def orchestrate(
     request: TaskRequest,
+    http_request: Request,
     db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
 ):
-    """
-    Execute a task through the OneAgent orchestrator
-    and persist the execution result.
-    """
-
+    execution_started = time.perf_counter()
     response = await orchestrator.process(
         task=request.task,
+        forced_agent_id=_normalize_chat_agent(request.agent_id),
+        user_id=user["id"],
+        db=db,
+    )
+    _log_execution(
+        http_request,
+        response,
+        round((time.perf_counter() - execution_started) * 1000, 2),
     )
 
     save_orchestration(
         db=db,
         task_text=request.task,
         response=response,
+        user_id=user["id"],
     )
 
     return response
@@ -974,31 +1140,25 @@ async def orchestrate(
 async def orchestration_status(
     workflow_id: str,
     db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
 ):
-    """
-    Return the actual workflow status and AI result.
-    """
-
     workflow = get_workflow(
         db=db,
         workflow_id=workflow_id,
+        user_id=user["id"],
     )
 
     if not workflow:
-        raise HTTPException(
-            status_code=404,
-            detail="Workflow not found",
-        )
+        raise HTTPException(status_code=404, detail="Workflow not found")
 
     output = None
     error = None
 
     for step in reversed(workflow.steps):
-        if step.task_id and step.task:
-            if step.task.result:
-                output = step.task.result.output
-                error = step.task.result.error
-                break
+        if step.task_id and step.task and step.task.result:
+            output = step.task.result.output
+            error = step.task.result.error
+            break
 
     return {
         "workflow_id": workflow.id,
@@ -1012,17 +1172,12 @@ async def orchestration_status(
 # TASK ANALYSIS
 # ============================================================
 
-
-@app.post(
-    "/api/analyze",
-    tags=["Orchestration"],
-)
-async def analyze_task(request: TaskRequest):
-
-    analysis = await orchestrator.analyzer.analyze(
-        request.task,
-    )
-
+@app.post("/api/analyze", tags=["Orchestration"])
+async def analyze_task(
+    request: TaskRequest,
+    user: dict = Depends(get_current_user),
+):
+    analysis = await orchestrator.analyzer.analyze(request.task)
     return analysis.model_dump()
 
 
@@ -1030,25 +1185,18 @@ async def analyze_task(request: TaskRequest):
 # TASK HISTORY
 # ============================================================
 
-
-@app.get(
-    "/api/tasks",
-    tags=["Tasks"],
-)
+@app.get("/api/tasks", tags=["Tasks"])
 async def get_tasks(
     db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
 ):
-    """
-    Return recently persisted OneAgent tasks with their final answer.
-    """
-
-    tasks = get_recent_tasks(db)
-
+    tasks = get_recent_tasks(db, user_id=user["id"])
     task_list = []
 
     for task in tasks:
         result_text = None
         error_text = None
+        metadata = None
 
         if task.result:
             error_text = task.result.error
@@ -1058,6 +1206,7 @@ async def get_tasks(
                     parsed = json.loads(task.result.output)
 
                     if isinstance(parsed, dict):
+                        metadata = parsed
                         result_text = (
                             parsed.get("output")
                             or parsed.get("result")
@@ -1079,30 +1228,25 @@ async def get_tasks(
                 "task": task.task_text,
                 "status": task.status,
                 "created_at": task.created_at.isoformat(),
-
                 "agent": (
                     task.execution.agent_id
                     if task.execution
                     else None
                 ),
-
                 "model": (
                     task.execution.model
                     if task.execution
                     else None
                 ),
-
                 "confidence": (
                     task.execution.routing_confidence
                     if task.execution
                     else None
                 ),
-
                 "result": result_text,
                 "error": error_text,
+                "metadata": metadata,
             }
         )
 
-    return {
-        "tasks": task_list
-    }
+    return {"tasks": task_list}

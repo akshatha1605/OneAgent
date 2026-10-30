@@ -1,74 +1,57 @@
 
 import os
-from typing import Dict, Type
 
 from app.models.model_adapter import ModelAdapter
 from app.models.gemini_adapter import GeminiAdapter
 from app.models.groq_adapter import GroqAdapter
-from app.models.groq_adapter import GrokAdapter
-
-try:
-    from app.models.openai_adapter import OpenAIAdapter
-except ImportError:
-    OpenAIAdapter = None
+from app.models.grok_adapter import GrokAdapter
+from app.models.openai_adapter import OpenAIAdapter
 
 
 class ModelRegistry:
-    """
-    Central registry for available LLM providers.
-
-    Providers are available only when their required API key
-    is configured.
-    """
-
     def __init__(self):
-        self._models: Dict[str, Type[ModelAdapter]] = {
+        self._models = {
+            "openai": OpenAIAdapter,
             "gemini": GeminiAdapter,
             "groq": GroqAdapter,
             "grok": GrokAdapter,
         }
 
-        if OpenAIAdapter is not None:
-            self._models["openai"] = OpenAIAdapter
-
-    def get(self, provider: str) -> ModelAdapter:
+    def get(
+        self,
+        provider: str,
+        api_key: str | None = None,
+    ) -> ModelAdapter:
         provider = provider.lower().strip()
         model_class = self._models.get(provider)
 
-        if not model_class:
-            available = ", ".join(self.list_available_providers())
+        if model_class is None:
+            available = ", ".join(self._models.keys())
             raise ValueError(
-                f"Model provider '{provider}' is unavailable. "
+                f"Unsupported model provider '{provider}'. "
                 f"Available providers: {available}"
             )
 
-        return model_class()
+        return model_class(api_key=api_key)
 
     def list_providers(self) -> list[str]:
         return list(self._models.keys())
 
-    def list_available_providers(self) -> list[str]:
-        key_mapping = {
+    def list_available_providers(
+        self,
+        user_keys: list[str] | None = None,
+    ) -> list[str]:
+        user_keys = user_keys or []
+
+        environment_keys = {
+            "openai": "OPENAI_API_KEY",
             "gemini": "GEMINI_API_KEY",
             "groq": "GROQ_API_KEY",
             "grok": "XAI_API_KEY",
-            "openai": "OPENAI_API_KEY",
         }
 
         return [
             provider
-            for provider in self._models
-            if os.getenv(key_mapping.get(provider, ""))
+            for provider, env_name in environment_keys.items()
+            if provider in user_keys or os.getenv(env_name)
         ]
-
-    def register(
-        self,
-        name: str,
-        model_class: Type[ModelAdapter],
-    ) -> None:
-        if not issubclass(model_class, ModelAdapter):
-            raise TypeError(
-                "Model provider must extend ModelAdapter."
-            )
-
-        self._models[name.lower().strip()] = model_class

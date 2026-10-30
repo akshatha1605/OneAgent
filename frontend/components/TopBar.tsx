@@ -64,8 +64,8 @@ useEffect(() => {
       setNotificationError("");
 
       const [tasksResult, workflowsResult] = await Promise.allSettled([
-        getTasks(),
-        getWorkflows(),
+        getTasks({ limit: 20 }),
+        getWorkflows({ limit: 20 }),
       ]);
 
       const items: NotificationItem[] = [];
@@ -89,7 +89,7 @@ useEffect(() => {
               title: "Task failed",
               description: task.task || "Your task execution failed.",
               status: "failed",
-              createdAt: task.created_at,
+              createdAt: task.created_at || task.created_at,
               type: "task",
             });
           }
@@ -263,10 +263,15 @@ useEffect(() => {
 
     if (Number.isNaN(date.getTime())) return "";
 
-    return date.toLocaleString([], {
-      dateStyle: "short",
-      timeStyle: "short",
-    });
+    return new Intl.DateTimeFormat("en-IN", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+      timeZone: "Asia/Kolkata",
+    }).format(date);
   }
 
   return (

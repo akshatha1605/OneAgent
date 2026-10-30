@@ -4,6 +4,7 @@ import logging
 import os
 import time
 import uuid
+from datetime import datetime, timedelta
 from importlib import import_module
 
 try:
@@ -34,8 +35,11 @@ from app.database.repository import (
     get_conversation_messages,
     get_conversations,
     get_recent_tasks,
+    count_tasks,
+    get_task,
     get_workflow,
     get_workflows,
+    get_weekly_usage,
     save_orchestration,
     update_workflow_status,
 )
@@ -99,17 +103,17 @@ if is_sqlite:
 # ============================================================
 # CORS
 # ============================================================
-
+origins = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ALLOWED_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000,https://one-agent-ai.vercel.app",
+    ).split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        origin.strip()
-        for origin in os.getenv(
-            "CORS_ALLOWED_ORIGINS",
-            "http://localhost:3000,http://127.0.0.1:3000",
-        ).split(",")
-        if origin.strip()
-    ],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -258,6 +262,53 @@ def _serialize_workflow_step(step):
         "model": execution.model if execution else None,
         "result": result_payload,
         "error": result.error if result else None,
+    }
+
+
+def _serialize_task(task):
+    result_text = None
+    error_text = None
+    metadata = None
+
+    if task.result:
+        error_text = task.result.error
+
+        if task.result.output:
+            try:
+                parsed = json.loads(task.result.output)
+
+                if isinstance(parsed, dict):
+                    metadata = parsed
+                    result_text = (
+                        parsed.get("output")
+                        or parsed.get("result")
+                        or parsed.get("message")
+                        or parsed.get("answer")
+                    )
+
+                    if result_text is None:
+                        result_text = str(parsed)
+                else:
+                    result_text = str(parsed)
+
+            except json.JSONDecodeError:
+                result_text = task.result.output
+
+    return {
+        "id": task.id,
+        "task": task.task_text,
+        "status": task.status,
+        "created_at": task.created_at.isoformat(),
+        "agent": task.execution.agent_id if task.execution else None,
+        "model": task.execution.model if task.execution else None,
+        "confidence": (
+            task.execution.routing_confidence
+            if task.execution
+            else None
+        ),
+        "result": result_text,
+        "error": error_text,
+        "metadata": metadata,
     }
 
 
@@ -515,7 +566,7 @@ async def get_conversations_endpoint(
 
 @app.get("/api/conversations/{conversation_id}", tags=["Conversations"])
 async def get_conversation_endpoint(
-    conversation_id: str,
+    conversation_id: int,
     db: Session = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
@@ -564,7 +615,7 @@ async def get_conversation_endpoint(
     dependencies=[Depends(enforce_user_rate_limit("message"))],
 )
 async def send_conversation_message(
-    conversation_id: str,
+    conversation_id: int,
     request: ConversationMessageCreate,
     http_request: Request,
     db: Session = Depends(get_db),
@@ -728,10 +779,21 @@ async def create_workflow_endpoint(
 
 @app.get("/api/workflows", tags=["Workflows"])
 async def get_workflows_endpoint(
+    limit: int = 50,
     db: Session = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
-    workflows = get_workflows(db, user_id=user["id"])
+    if limit < 1 or limit > 100:
+        raise HTTPException(
+            status_code=400,
+            detail="limit must be between 1 and 100",
+        )
+
+    workflows = get_workflows(
+        db,
+        user_id=user["id"],
+        limit=limit,
+    )
 
     return {
         "workflows": [
@@ -1185,68 +1247,68 @@ async def analyze_task(
 # TASK HISTORY
 # ============================================================
 
-@app.get("/api/tasks", tags=["Tasks"])
-async def get_tasks(
+@app.get("/api/usage/summary", tags=["Usage"])
+async def get_usage_summary(
     db: Session = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
-    tasks = get_recent_tasks(db, user_id=user["id"])
-    task_list = []
+    now = datetime.utcnow()
+    week_start = (
+        now - timedelta(days=now.weekday())
+    ).replace(hour=0, minute=0, second=0, microsecond=0)
+    return get_weekly_usage(
+        db=db,
+        user_id=user["id"],
+        week_start=week_start,
+    )
 
-    for task in tasks:
-        result_text = None
-        error_text = None
-        metadata = None
 
-        if task.result:
-            error_text = task.result.error
+@app.get("/api/tasks/{task_id}", tags=["Tasks"])
+async def get_task_detail(
+    task_id: int,
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    task = get_task(db=db, task_id=task_id, user_id=user["id"])
 
-            if task.result.output:
-                try:
-                    parsed = json.loads(task.result.output)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
 
-                    if isinstance(parsed, dict):
-                        metadata = parsed
-                        result_text = (
-                            parsed.get("output")
-                            or parsed.get("result")
-                            or parsed.get("message")
-                            or parsed.get("answer")
-                        )
+    return _serialize_task(task)
 
-                        if result_text is None:
-                            result_text = str(parsed)
-                    else:
-                        result_text = str(parsed)
 
-                except json.JSONDecodeError:
-                    result_text = task.result.output
-
-        task_list.append(
-            {
-                "id": task.id,
-                "task": task.task_text,
-                "status": task.status,
-                "created_at": task.created_at.isoformat(),
-                "agent": (
-                    task.execution.agent_id
-                    if task.execution
-                    else None
-                ),
-                "model": (
-                    task.execution.model
-                    if task.execution
-                    else None
-                ),
-                "confidence": (
-                    task.execution.routing_confidence
-                    if task.execution
-                    else None
-                ),
-                "result": result_text,
-                "error": error_text,
-                "metadata": metadata,
-            }
+@app.get("/api/tasks", tags=["Tasks"])
+async def get_tasks(
+    limit: int = 20,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    if limit < 1 or limit > 100:
+        raise HTTPException(
+            status_code=400,
+            detail="limit must be between 1 and 100",
+        )
+    if offset < 0:
+        raise HTTPException(
+            status_code=400,
+            detail="offset must be non-negative",
         )
 
-    return {"tasks": task_list}
+    tasks = get_recent_tasks(
+        db,
+        user_id=user["id"],
+        limit=limit,
+        offset=offset,
+    )
+    total = count_tasks(db, user_id=user["id"])
+
+    return {
+        "tasks": [_serialize_task(task) for task in tasks],
+        "pagination": {
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": offset + len(tasks) < total,
+        },
+    }

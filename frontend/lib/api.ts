@@ -163,8 +163,11 @@ export type WorkflowsResponse = {
   workflows: BackendWorkflow[];
 };
 
-export function getWorkflows() {
-  return request<WorkflowsResponse>("/api/workflows");
+export function getWorkflows(options?: { limit?: number }) {
+  const query = options?.limit
+    ? `?limit=${encodeURIComponent(options.limit)}`
+    : "";
+  return request<WorkflowsResponse>(`/api/workflows${query}`);
 }
 
 export type WorkflowTask = {
@@ -546,12 +549,50 @@ export type TaskHistoryItem = {
   error: string | null;
 };
 
-export type TasksResponse = {
-  tasks: TaskHistoryItem[];
+export type TasksPagination = {
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
 };
 
-export function getTasks() {
-  return request<TasksResponse>("/api/tasks");
+export type TasksResponse = {
+  tasks: TaskHistoryItem[];
+  pagination: TasksPagination;
+};
+
+export function getTasks(options?: {
+  limit?: number;
+  offset?: number;
+}) {
+  const params = new URLSearchParams();
+
+  if (options?.limit !== undefined) {
+    params.set("limit", String(options.limit));
+  }
+  if (options?.offset !== undefined) {
+    params.set("offset", String(options.offset));
+  }
+
+  const query = params.toString();
+  return request<TasksResponse>(
+    query ? `/api/tasks?${query}` : "/api/tasks"
+  );
+}
+
+export function getTask(taskId: string) {
+  return request<TaskHistoryItem>(
+    `/api/tasks/${encodeURIComponent(taskId)}`
+  );
+}
+
+export type UsageSummary = {
+  weekly_agent_calls: number;
+  weekly_workflows: number;
+};
+
+export function getUsageSummary() {
+  return request<UsageSummary>("/api/usage/summary");
 }
 
 /* -------------------------------------------------------------------------- */

@@ -133,6 +133,9 @@ function mapTaskToHistoryEntry(
 export default function HistoryPage() {
   const [tasks, setTasks] = useState<TaskHistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [error, setError] = useState("");
 
   const {
     weeklyAgentCalls,
@@ -143,15 +146,20 @@ export default function HistoryPage() {
     async function loadHistory() {
       try {
         setLoading(true);
+        setError("");
 
         const response = await getTasks();
 
-        console.log("History tasks:", response.tasks);
-
         setTasks(response.tasks || []);
+        setHasMore(response.pagination?.has_more ?? false);
       } catch (error) {
         console.error("Failed to load history:", error);
         setTasks([]);
+        setError(
+          error instanceof Error
+            ? error.message
+            : "Unable to load history."
+        );
       } finally {
         setLoading(false);
       }
@@ -159,6 +167,30 @@ export default function HistoryPage() {
 
     loadHistory();
   }, []);
+
+  async function loadMore() {
+    if (loadingMore || !hasMore) {
+      return;
+    }
+
+    try {
+      setLoadingMore(true);
+      const response = await getTasks({
+        offset: tasks.length,
+      });
+      setTasks((current) => [...current, ...response.tasks]);
+      setHasMore(response.pagination?.has_more ?? false);
+    } catch (loadError) {
+      console.error("Failed to load more history:", loadError);
+      setError(
+        loadError instanceof Error
+          ? loadError.message
+          : "Unable to load more history."
+      );
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   const entries = tasks.map(mapTaskToHistoryEntry);
 
@@ -192,8 +224,31 @@ export default function HistoryPage() {
                   Loading history...
                 </p>
               </div>
+            ) : error && tasks.length === 0 ? (
+              <div className="rounded-2xl border border-red-200 bg-red-50 px-6 py-10 text-center">
+                <p className="text-sm text-red-700">{error}</p>
+              </div>
             ) : (
               <HistoryList entries={entries} />
+            )}
+
+            {!loading && tasks.length > 0 && hasMore && (
+              <div className="mt-5 flex justify-center">
+                <button
+                  type="button"
+                  onClick={() => void loadMore()}
+                  disabled={loadingMore}
+                  className="rounded-xl border border-border bg-card px-4 py-2 text-sm font-medium text-primary transition-colors hover:bg-background disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {loadingMore ? "Loading..." : "Load more"}
+                </button>
+              </div>
+            )}
+
+            {!loading && error && tasks.length > 0 && (
+              <p className="mt-3 text-center text-sm text-red-600">
+                {error}
+              </p>
             )}
           </div>
         </main>

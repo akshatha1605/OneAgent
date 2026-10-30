@@ -247,6 +247,74 @@ def test_task_history_and_api_key_response_are_user_scoped(client):
     )["configured"] is True
 
 
+def test_task_pagination_detail_ownership_and_usage_summary(
+    client,
+    monkeypatch,
+):
+    async def fake_process(**kwargs):
+        return {
+            "status": "completed",
+            "selected_agent": {"id": "coding"},
+            "model": {"selected": "fake-model"},
+            "result": {"status": "completed", "output": "ok"},
+        }
+
+    monkeypatch.setattr(main_module.orchestrator, "process", fake_process)
+
+    first = client.post(
+        "/api/orchestrate",
+        headers=auth(),
+        json={"task": "first task"},
+    )
+    second = client.post(
+        "/api/orchestrate",
+        headers=auth(),
+        json={"task": "second task"},
+    )
+    assert first.status_code == second.status_code == 200
+
+    workflow = client.post(
+        "/api/workflows",
+        headers=auth(),
+        json={"task": "weekly workflow"},
+    )
+    assert workflow.status_code == 200
+
+    page = client.get(
+        "/api/tasks?limit=1&offset=0",
+        headers=auth(),
+    )
+    assert page.status_code == 200
+    assert len(page.json()["tasks"]) == 1
+    assert page.json()["pagination"] == {
+        "total": 2,
+        "limit": 1,
+        "offset": 0,
+        "has_more": True,
+    }
+
+    task_id = page.json()["tasks"][0]["id"]
+    detail = client.get(
+        f"/api/tasks/{task_id}",
+        headers=auth(),
+    )
+    assert detail.status_code == 200
+    assert detail.json()["id"] == task_id
+
+    forbidden = client.get(
+        f"/api/tasks/{task_id}",
+        headers=auth("user-b-token"),
+    )
+    assert forbidden.status_code == 404
+
+    usage = client.get("/api/usage/summary", headers=auth())
+    assert usage.status_code == 200
+    assert usage.json() == {
+        "weekly_agent_calls": 2,
+        "weekly_workflows": 1,
+    }
+
+
 def test_rate_limit_returns_retry_guidance(client, monkeypatch):
     db = main_module.SessionLocal()
     try:

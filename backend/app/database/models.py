@@ -6,6 +6,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -66,6 +67,9 @@ class Message(Base):
 
 class Workflow(Base):
     __tablename__ = "workflows"
+    __table_args__ = (
+        Index("ix_workflows_user_created_at", "user_id", "created_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     task: Mapped[str] = mapped_column(Text, nullable=False)
@@ -106,6 +110,9 @@ class WorkflowStep(Base):
 
 class Task(Base):
     __tablename__ = "tasks"
+    __table_args__ = (
+        Index("ix_tasks_user_created_at", "user_id", "created_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     task_text: Mapped[str] = mapped_column(Text, nullable=False)

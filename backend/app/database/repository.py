@@ -3,6 +3,9 @@ import json
 from datetime import datetime
 from typing import Any
 
+from sqlalchemy import func
+from sqlalchemy.orm import joinedload, selectinload
+
 Session = Any
 
 from app.database.models import (
@@ -54,7 +57,7 @@ def get_conversations(
 
 def get_conversation(
     db: Session,
-    conversation_id: str,
+    conversation_id: int,
     user_id: str,
 ):
     return (
@@ -89,7 +92,7 @@ def update_conversation_title(
 
 def create_message(
     db: Session,
-    conversation_id: str,
+    conversation_id: int,
     role: str,
     content: str,
     model: str | None = None,
@@ -137,7 +140,7 @@ def create_message(
 
 def get_conversation_messages(
     db: Session,
-    conversation_id: str,
+    conversation_id: int,
     user_id: str,
 ):
     return (
@@ -221,14 +224,66 @@ def get_recent_tasks(
     db: Session,
     user_id: str,
     limit: int = 20,
+    offset: int = 0,
 ):
     return (
         db.query(Task)
         .filter(Task.user_id == user_id)
+        .options(
+            joinedload(Task.execution),
+            joinedload(Task.result),
+        )
         .order_by(Task.created_at.desc())
+        .offset(offset)
         .limit(limit)
         .all()
     )
+
+
+def count_tasks(db: Session, user_id: str) -> int:
+    return (
+        db.query(func.count(Task.id))
+        .filter(Task.user_id == user_id)
+        .scalar()
+        or 0
+    )
+
+
+def get_task(db: Session, task_id: int, user_id: str):
+    return (
+        db.query(Task)
+        .filter(Task.id == task_id, Task.user_id == user_id)
+        .options(
+            joinedload(Task.execution),
+            joinedload(Task.result),
+        )
+        .first()
+    )
+
+
+def get_weekly_usage(db: Session, user_id: str, week_start: datetime):
+    task_count = (
+        db.query(func.count(Task.id))
+        .filter(
+            Task.user_id == user_id,
+            Task.created_at >= week_start,
+        )
+        .scalar()
+        or 0
+    )
+    workflow_count = (
+        db.query(func.count(Workflow.id))
+        .filter(
+            Workflow.user_id == user_id,
+            Workflow.created_at >= week_start,
+        )
+        .scalar()
+        or 0
+    )
+    return {
+        "weekly_agent_calls": task_count,
+        "weekly_workflows": workflow_count,
+    }
 
 
 # ============================================================
@@ -262,6 +317,7 @@ def get_workflows(
     return (
         db.query(Workflow)
         .filter(Workflow.user_id == user_id)
+        .options(selectinload(Workflow.steps))
         .order_by(Workflow.created_at.desc())
         .limit(limit)
         .all()

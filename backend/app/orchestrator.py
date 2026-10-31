@@ -24,7 +24,7 @@ class Orchestrator:
     AGENT_EXECUTION_TIMEOUT_SECONDS = 60
 
     MODEL_PREFERENCES = {
-        "coding": ["groq", "gemini"],
+        "coding": ["groq", "gemini","open ai"],
         "research": ["gemini", "groq"],
         "writing": ["groq", "gemini"],
         "document": ["gemini", "groq"],
